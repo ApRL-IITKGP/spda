@@ -1,0 +1,41 @@
+success_once: 0.69, return: 29.78:  35%|█████████████████████████████████████████████▎                                                                                    | 136/390 [04:14<07:56,  1.87s/it]
+Traceback (most recent call last):
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 505, in <module>
+    next_obs, next_done, container, final_values = rollout(next_obs, next_done)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 233, in rollout
+    next_obs, reward, next_done, infos = step_func(action)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 402, in step_func
+    next_obs, reward, terminations, truncations, info = envs.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/vector/wrappers/gymnasium.py", line 111, in step
+    obs, rew, terminations, truncations, infos = self._env.step(actions)
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/registration.py", line 161, in step
+    observation, reward, terminated, truncated, info = self.env.step(action)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/gymnasium/wrappers/order_enforcing.py", line 56, in step
+    return self.env.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 956, in step
+    action = self._step_action(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 1027, in _step_action
+    self.scene.step()
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/scene.py", line 370, in step
+    self.px.step()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 505, in <module>
+    next_obs, next_done, container, final_values = rollout(next_obs, next_done)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 233, in rollout
+    next_obs, reward, next_done, infos = step_func(action)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 402, in step_func
+    next_obs, reward, terminations, truncations, info = envs.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/vector/wrappers/gymnasium.py", line 111, in step
+    obs, rew, terminations, truncations, infos = self._env.step(actions)
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/registration.py", line 161, in step
+    observation, reward, terminated, truncated, info = self.env.step(action)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/gymnasium/wrappers/order_enforcing.py", line 56, in step
+    return self.env.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 956, in step
+    action = self._step_action(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 1027, in _step_action
+    self.scene.step()
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/scene.py", line 370, in step
+    self.px.step()
+KeyboardInterrupt

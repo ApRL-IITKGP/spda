@@ -1,0 +1,61 @@
+success_once: 0.00, return: 30.29:  59%|███████████████████████████████████████████████████████████████████████████▊                                                    | 1852/3125 [58:47<40:24,  1.90s/it]
+Traceback (most recent call last):
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 505, in <module>
+    next_obs, next_done, container, final_values = rollout(next_obs, next_done)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 233, in rollout
+    next_obs, reward, next_done, infos = step_func(action)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 402, in step_func
+    next_obs, reward, terminations, truncations, info = envs.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/vector/wrappers/gymnasium.py", line 111, in step
+    obs, rew, terminations, truncations, infos = self._env.step(actions)
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/registration.py", line 161, in step
+    observation, reward, terminated, truncated, info = self.env.step(action)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/gymnasium/wrappers/order_enforcing.py", line 56, in step
+    return self.env.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 958, in step
+    info = self.get_info()
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 1055, in get_info
+    info.update(self.evaluate())
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/tasks/tabletop/stack_cube.py", line 155, in evaluate
+    is_cubeA_grasped = self.agent.is_grasping(self.cubeA)
+  File "/home/chomy/git/ManiSkill3/mani_skill/agents/robots/panda/panda.py", line 255, in is_grasping
+    rdirection = -self.finger2_link.pose.to_transformation_matrix()[..., :3, 1]
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/structs/pose.py", line 235, in to_transformation_matrix
+    mat[..., :3, :3] = quaternion_to_matrix(self.q)
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/geometry/rotation_conversions.py", line 57, in quaternion_to_matrix
+    two_s = 2.0 / (quaternions * quaternions).sum(-1)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/torch/_tensor.py", line 39, in wrapped
+    return f(*args, **kwargs)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/torch/_tensor.py", line 1032, in __rdiv__
+    return self.reciprocal() * other
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 505, in <module>
+    next_obs, next_done, container, final_values = rollout(next_obs, next_done)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 233, in rollout
+    next_obs, reward, next_done, infos = step_func(action)
+  File "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py", line 402, in step_func
+    next_obs, reward, terminations, truncations, info = envs.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/vector/wrappers/gymnasium.py", line 111, in step
+    obs, rew, terminations, truncations, infos = self._env.step(actions)
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/registration.py", line 161, in step
+    observation, reward, terminated, truncated, info = self.env.step(action)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/gymnasium/wrappers/order_enforcing.py", line 56, in step
+    return self.env.step(action)
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 958, in step
+    info = self.get_info()
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/sapien_env.py", line 1055, in get_info
+    info.update(self.evaluate())
+  File "/home/chomy/git/ManiSkill3/mani_skill/envs/tasks/tabletop/stack_cube.py", line 155, in evaluate
+    is_cubeA_grasped = self.agent.is_grasping(self.cubeA)
+  File "/home/chomy/git/ManiSkill3/mani_skill/agents/robots/panda/panda.py", line 255, in is_grasping
+    rdirection = -self.finger2_link.pose.to_transformation_matrix()[..., :3, 1]
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/structs/pose.py", line 235, in to_transformation_matrix
+    mat[..., :3, :3] = quaternion_to_matrix(self.q)
+  File "/home/chomy/git/ManiSkill3/mani_skill/utils/geometry/rotation_conversions.py", line 57, in quaternion_to_matrix
+    two_s = 2.0 / (quaternions * quaternions).sum(-1)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/torch/_tensor.py", line 39, in wrapped
+    return f(*args, **kwargs)
+  File "/home/chomy/anaconda3/envs/latentbc_vision/lib/python3.9/site-packages/torch/_tensor.py", line 1032, in __rdiv__
+    return self.reciprocal() * other
+KeyboardInterrupt

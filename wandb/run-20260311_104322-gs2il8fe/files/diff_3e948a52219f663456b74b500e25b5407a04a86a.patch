@@ -1,0 +1,485 @@
+diff --git a/examples/baselines/ppo/ppo.py b/examples/baselines/ppo/ppo.py
+index 4e634ac..2b9c11d 100644
+--- a/examples/baselines/ppo/ppo.py
++++ b/examples/baselines/ppo/ppo.py
+@@ -139,7 +139,7 @@ class Agent(nn.Module):
+             nn.Tanh(),
+             layer_init(nn.Linear(256, np.prod(envs.single_action_space.shape)), std=0.01*np.sqrt(2)),
+         )
+-        self.actor_logstd = nn.Parameter(torch.ones(1, np.prod(envs.single_action_space.shape)) * -0.5)
++        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+ 
+     def get_value(self, x):
+         return self.critic(x)
+diff --git a/examples/baselines/ppo/ppo_fast.py b/examples/baselines/ppo/ppo_fast.py
+index 417a76e..9b0fbc7 100644
+--- a/examples/baselines/ppo/ppo_fast.py
++++ b/examples/baselines/ppo/ppo_fast.py
+@@ -46,8 +46,8 @@ class Args:
+     """the wandb's project name"""
+     wandb_entity: Optional[str] = None
+     """the entity (team) of wandb's project"""
+-    wandb_group: str = "PPO"
+-    """the group of the run for wandb"""
++    wandb_group: str = "REP"
++    """the group of the run for wandb (use 'REP' for reward sweep runs)"""
+     capture_video: bool = True
+     """whether to capture videos of the agent performances (check out `videos` folder)"""
+     save_trajectory: bool = False
+@@ -87,6 +87,14 @@ class Args:
+     control_mode: Optional[str] = "pd_joint_delta_pos"
+     """the control mode to use for the environment"""
+ 
++    # Reward variant arguments (RewardGeom study)
++    reach_variant: str = "tanh"
++    """reaching reward shape: tanh|linear|exponential|quadratic|piecewise_cc|concave_truncated|oscillatory|sparse_threshold"""
++    gate_variant: str = "hard"
++    """gating mechanism: hard|soft|additive|curriculum"""
++    terminal_variant: str = "hard_jump"
++    """terminal bonus: hard_jump|smooth|none"""
++
+     # Algorithm specific arguments
+     total_timesteps: int = 10000000
+     """total timesteps of the experiments"""
+@@ -118,7 +126,7 @@ class Args:
+     """the target KL divergence threshold"""
+     reward_scale: float = 1.0
+     """Scale the reward by this factor"""
+-    finite_horizon_gae: bool = False
++    finite_horizon_gae: bool = True
+ 
+     # to be filled in runtime
+     batch_size: int = 0
+@@ -240,7 +248,7 @@ def rollout(obs, done):
+                 vals=value.flatten(),
+                 actions=action,
+                 logprobs=logprob,
+-                rewards=reward,
++                rewards=reward * args.reward_scale,
+                 batch_size=(args.num_envs,),
+             )
+         )
+@@ -312,7 +320,13 @@ if __name__ == "__main__":
+     args.num_iterations = args.total_timesteps // args.batch_size
+     if args.exp_name is None:
+         args.exp_name = os.path.basename(__file__)[: -len(".py")]
+-        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
++        run_name = (
++            f"{args.env_id}"
++            f"__reach-{args.reach_variant}"
++            f"__gate-{args.gate_variant}"
++            f"__term-{args.terminal_variant}"
++            f"__{args.exp_name}__{args.seed}__{int(time.time())}"
++        )
+     else:
+         run_name = args.exp_name
+ 
+@@ -328,6 +342,10 @@ if __name__ == "__main__":
+     env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu")
+     if args.control_mode is not None:
+         env_kwargs["control_mode"] = args.control_mode
++    # Pass reward variant kwargs so env receives reach/gate/terminal settings
++    env_kwargs["reach_variant"] = args.reach_variant
++    env_kwargs["gate_variant"] = args.gate_variant
++    env_kwargs["terminal_variant"] = args.terminal_variant
+     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
+     eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, human_render_camera_configs=dict(shader_pack="default"), **env_kwargs)
+     if isinstance(envs.action_space, gym.spaces.Dict):
+@@ -503,6 +521,13 @@ if __name__ == "__main__":
+         logger.add_scalar("losses/old_approx_kl", out["old_approx_kl"].item(), global_step)
+         logger.add_scalar("losses/approx_kl", out["approx_kl"].item(), global_step)
+         logger.add_scalar("losses/clipfrac", torch.stack(clipfracs).mean().cpu().item(), global_step)
++        logger.add_scalar("losses/grad_norm", out["gn"].item(), global_step)
++        # explained variance: how well value fn predicts returns
++        returns_flat = container["returns"].view(-1)
++        vals_flat = container["vals"].view(-1)
++        var_returns = torch.var(returns_flat)
++        explained_var = (1.0 - torch.var(returns_flat - vals_flat) / (var_returns + 1e-8)).item()
++        logger.add_scalar("charts/explained_variance", explained_var, global_step)
+         logger.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+         logger.add_scalar("time/step", global_step, global_step)
+         logger.add_scalar("time/update_time", update_time, global_step)
+diff --git a/examples/baselines/ppo/ppo_rgb.py b/examples/baselines/ppo/ppo_rgb.py
+index 46fb5e3..1881130 100644
+--- a/examples/baselines/ppo/ppo_rgb.py
++++ b/examples/baselines/ppo/ppo_rgb.py
+@@ -100,7 +100,7 @@ class Args:
+     """coefficient of the value function"""
+     max_grad_norm: float = 0.5
+     """the maximum norm for the gradient clipping"""
+-    target_kl: float = 0.2
++    target_kl: float = 0.1
+     """the target KL divergence threshold"""
+     reward_scale: float = 1.0
+     """Scale the reward by this factor"""
+@@ -248,7 +248,7 @@ class Agent(nn.Module):
+             nn.ReLU(inplace=True),
+             layer_init(nn.Linear(512, np.prod(envs.unwrapped.single_action_space.shape)), std=0.01*np.sqrt(2)),
+         )
+-        self.actor_logstd = nn.Parameter(torch.ones(1, np.prod(envs.unwrapped.single_action_space.shape)) * -0.5)
++        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.unwrapped.single_action_space.shape)))
+     def get_features(self, x):
+         return self.feature_net(x)
+     def get_value(self, x):
+diff --git a/mani_skill/envs/tasks/tabletop/pick_cube.py b/mani_skill/envs/tasks/tabletop/pick_cube.py
+index 6cc11bb..03613bf 100644
+--- a/mani_skill/envs/tasks/tabletop/pick_cube.py
++++ b/mani_skill/envs/tasks/tabletop/pick_cube.py
+@@ -7,6 +7,11 @@ import torch
+ import mani_skill.envs.utils.randomization as randomization
+ from mani_skill.agents.robots import Fetch, Panda
+ from mani_skill.envs.sapien_env import BaseEnv
++from mani_skill.envs.tasks.tabletop.reward_variants import (
++    REACHING_VARIANTS,
++    apply_gate,
++    apply_terminal,
++)
+ from mani_skill.sensors.camera import CameraConfig
+ from mani_skill.utils import sapien_utils
+ from mani_skill.utils.building import actors
+@@ -38,8 +43,23 @@ class PickCubeEnv(BaseEnv):
+     cube_half_size = 0.02
+     goal_thresh = 0.025
+ 
+-    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
++    def __init__(
++        self,
++        *args,
++        robot_uids="panda",
++        robot_init_qpos_noise=0.02,
++        reach_variant="tanh",
++        gate_variant="hard",
++        terminal_variant="hard_jump",
++        **kwargs,
++    ):
+         self.robot_init_qpos_noise = robot_init_qpos_noise
++        if reach_variant not in REACHING_VARIANTS:
++            raise ValueError(f"Unknown reach_variant {reach_variant!r}. Valid: {list(REACHING_VARIANTS)}")
++        self.reach_fn = REACHING_VARIANTS[reach_variant]
++        self.reach_variant = reach_variant
++        self.gate_variant = gate_variant
++        self.terminal_variant = terminal_variant
+         super().__init__(*args, robot_uids=robot_uids, **kwargs)
+ 
+     @property
+@@ -126,7 +146,7 @@ class PickCubeEnv(BaseEnv):
+         tcp_to_obj_dist = torch.linalg.norm(
+             self.cube.pose.p - self.agent.tcp.pose.p, axis=1
+         )
+-        reaching_reward = 1 - torch.tanh(5 * tcp_to_obj_dist)
++        reaching_reward = self.reach_fn(tcp_to_obj_dist)
+         reward = reaching_reward
+ 
+         is_grasped = info["is_grasped"]
+@@ -136,14 +156,29 @@ class PickCubeEnv(BaseEnv):
+             self.goal_site.pose.p - self.cube.pose.p, axis=1
+         )
+         place_reward = 1 - torch.tanh(5 * obj_to_goal_dist)
+-        reward += place_reward * is_grasped
++
++        # Compute continuous grasp quality for soft gate (gripper closure proxy)
++        grasp_quality = None
++        if self.gate_variant == "soft":
++            gripper_width = (self.agent.robot.get_qlimits()[0, -1, 1] * 2).to(self.device)
++            gripper_openness = torch.sum(self.agent.robot.get_qpos()[:, -2:], axis=1) / gripper_width
++            grasp_quality = torch.sigmoid(10.0 * (0.5 - gripper_openness))
++
++        reward += apply_gate(
++            self.gate_variant,
++            place_reward,
++            is_grasped,
++            grasp_quality=grasp_quality,
++            elapsed_steps=self.elapsed_steps,
++            max_steps=getattr(self.spec, 'max_episode_steps', 50),
++        )
+ 
+         static_reward = 1 - torch.tanh(
+             5 * torch.linalg.norm(self.agent.robot.get_qvel()[..., :-2], axis=1)
+         )
+         reward += static_reward * info["is_obj_placed"]
+ 
+-        reward[info["success"]] = 5
++        reward = apply_terminal(self.terminal_variant, reward, info["success"], max_reward=5)
+         return reward
+ 
+     def compute_normalized_dense_reward(
+diff --git a/mani_skill/envs/tasks/tabletop/place_sphere.py b/mani_skill/envs/tasks/tabletop/place_sphere.py
+index e0a37e1..39e9cdb 100644
+--- a/mani_skill/envs/tasks/tabletop/place_sphere.py
++++ b/mani_skill/envs/tasks/tabletop/place_sphere.py
+@@ -10,6 +10,11 @@ from transforms3d.euler import euler2quat
+ 
+ from mani_skill.agents.robots import Fetch, Panda
+ from mani_skill.envs.sapien_env import BaseEnv
++from mani_skill.envs.tasks.tabletop.reward_variants import (
++    REACHING_VARIANTS,
++    apply_gate,
++    apply_terminal,
++)
+ from mani_skill.envs.utils import randomization
+ from mani_skill.sensors.camera import CameraConfig
+ from mani_skill.utils import common, sapien_utils
+@@ -55,8 +60,23 @@ class PlaceSphereEnv(BaseEnv):
+         2 * short_side_half_size,
+     ]  # The edge block of the bin, which is smaller. The representations are similar to the above one
+ 
+-    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
++    def __init__(
++        self,
++        *args,
++        robot_uids="panda",
++        robot_init_qpos_noise=0.02,
++        reach_variant="tanh",
++        gate_variant="hard",
++        terminal_variant="hard_jump",
++        **kwargs,
++    ):
+         self.robot_init_qpos_noise = robot_init_qpos_noise
++        if reach_variant not in REACHING_VARIANTS:
++            raise ValueError(f"Unknown reach_variant {reach_variant!r}. Valid: {list(REACHING_VARIANTS)}")
++        self.reach_fn = REACHING_VARIANTS[reach_variant]
++        self.reach_variant = reach_variant
++        self.gate_variant = gate_variant
++        self.terminal_variant = terminal_variant
+         super().__init__(*args, robot_uids=robot_uids, **kwargs)
+ 
+     @property
+@@ -218,38 +238,50 @@ class PlaceSphereEnv(BaseEnv):
+         tcp_pose = self.agent.tcp.pose.p
+         obj_pos = self.obj.pose.p
+         obj_to_tcp_dist = torch.linalg.norm(tcp_pose - obj_pos, axis=1)
+-        reward = 2 * (1 - torch.tanh(5 * obj_to_tcp_dist))
++        reward = 2 * self.reach_fn(obj_to_tcp_dist)
+ 
+         # grasp and place reward
+         obj_pos = self.obj.pose.p
+-        self.bin.pose.p
+         bin_top_pos = self.bin.pose.p.clone()
+         bin_top_pos[:, 2] = bin_top_pos[:, 2] + self.block_half_size[0] + self.radius
+         obj_to_bin_top_dist = torch.linalg.norm(bin_top_pos - obj_pos, axis=1)
+         place_reward = 1 - torch.tanh(5.0 * obj_to_bin_top_dist)
+-        reward[info["is_obj_grasped"]] = (4 + place_reward)[info["is_obj_grasped"]]
+ 
+-        # ungrasp and static reward
+-        gripper_width = (self.agent.robot.get_qlimits()[0, -1, 1] * 2).to(self.device)
+         is_obj_grasped = info["is_obj_grasped"]
++        gripper_width = (self.agent.robot.get_qlimits()[0, -1, 1] * 2).to(self.device)
++
++        # Continuous grasp quality for soft gate
++        grasp_quality = None
++        if self.gate_variant == "soft":
++            gripper_openness = torch.sum(self.agent.robot.get_qpos()[:, -2:], axis=1) / gripper_width
++            grasp_quality = torch.sigmoid(10.0 * (0.5 - gripper_openness))
++
++        gated_place = apply_gate(
++            self.gate_variant,
++            place_reward,
++            is_obj_grasped,
++            grasp_quality=grasp_quality,
++            elapsed_steps=self.elapsed_steps,
++            max_steps=getattr(self.spec, 'max_episode_steps', 50),
++        )
++        # PlaceSphere: grasped phase overrides reward to 4 + place_reward
++        reward[is_obj_grasped] = (4 + gated_place)[is_obj_grasped]
++
++        # ungrasp and static reward
+         ungrasp_reward = (
+             torch.sum(self.agent.robot.get_qpos()[:, -2:], axis=1) / gripper_width
+         )
+-        ungrasp_reward[
+-            ~is_obj_grasped
+-        ] = 16.0  # give ungrasp a bigger reward, so that it exceeds the robot static reward and the gripper can close
++        # give ungrasp a bigger reward so gripper can close
++        ungrasp_reward[~is_obj_grasped] = 16.0
+         v = torch.linalg.norm(self.obj.linear_velocity, axis=1)
+         av = torch.linalg.norm(self.obj.angular_velocity, axis=1)
+         static_reward = 1 - torch.tanh(v * 10 + av)
+-        robot_static_reward = self.agent.is_static(
+-            0.2
+-        )  # keep the robot static at the end state, since the sphere may spin when being placed on top
++        robot_static_reward = self.agent.is_static(0.2)
+         reward[info["is_obj_on_bin"]] = (
+             6 + (ungrasp_reward + static_reward + robot_static_reward) / 3.0
+         )[info["is_obj_on_bin"]]
+ 
+-        # success reward
+-        reward[info["success"]] = 13
++        reward = apply_terminal(self.terminal_variant, reward, info["success"], max_reward=13)
+         return reward
+ 
+     def compute_normalized_dense_reward(self, obs: Any, action: Array, info: Dict):
+diff --git a/mani_skill/envs/tasks/tabletop/push_cube.py b/mani_skill/envs/tasks/tabletop/push_cube.py
+index 811922f..f9c9747 100644
+--- a/mani_skill/envs/tasks/tabletop/push_cube.py
++++ b/mani_skill/envs/tasks/tabletop/push_cube.py
+@@ -25,6 +25,11 @@ from transforms3d.euler import euler2quat
+ 
+ from mani_skill.agents.robots import Fetch, Panda
+ from mani_skill.envs.sapien_env import BaseEnv
++from mani_skill.envs.tasks.tabletop.reward_variants import (
++    REACHING_VARIANTS,
++    apply_gate,
++    apply_terminal,
++)
+ from mani_skill.sensors.camera import CameraConfig
+ from mani_skill.utils import common, sapien_utils
+ from mani_skill.utils.building import actors
+@@ -59,9 +64,24 @@ class PushCubeEnv(BaseEnv):
+     goal_radius = 0.1
+     cube_half_size = 0.02
+ 
+-    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
++    def __init__(
++        self,
++        *args,
++        robot_uids="panda",
++        robot_init_qpos_noise=0.02,
++        reach_variant="tanh",
++        gate_variant="hard",
++        terminal_variant="hard_jump",
++        **kwargs,
++    ):
+         # specifying robot_uids="panda" as the default means gym.make("PushCube-v1") will default to using the panda arm.
+         self.robot_init_qpos_noise = robot_init_qpos_noise
++        if reach_variant not in REACHING_VARIANTS:
++            raise ValueError(f"Unknown reach_variant {reach_variant!r}. Valid: {list(REACHING_VARIANTS)}")
++        self.reach_fn = REACHING_VARIANTS[reach_variant]
++        self.reach_variant = reach_variant
++        self.gate_variant = gate_variant
++        self.terminal_variant = terminal_variant
+         super().__init__(*args, robot_uids=robot_uids, **kwargs)
+ 
+     # Specify default simulation/gpu memory configurations to override any default values
+@@ -213,21 +233,32 @@ class PushCubeEnv(BaseEnv):
+         )
+         tcp_to_push_pose = tcp_push_pose.p - self.agent.tcp.pose.p
+         tcp_to_push_pose_dist = torch.linalg.norm(tcp_to_push_pose, axis=1)
+-        reaching_reward = 1 - torch.tanh(5 * tcp_to_push_pose_dist)
++        reaching_reward = self.reach_fn(tcp_to_push_pose_dist)
+         reward = reaching_reward
+ 
+-        # compute a placement reward to encourage robot to move the cube to the center of the goal region
+-        # we further multiply the place_reward by a mask reached so we only add the place reward if the robot has reached the desired push pose
+-        # This reward design helps train RL agents faster by staging the reward out.
++        # compute a placement reward; gate by whether tcp has reached push pose.
++        # For PushCube, "reached" plays the role of the grasp condition.
+         reached = tcp_to_push_pose_dist < 0.01
+         obj_to_goal_dist = torch.linalg.norm(
+             self.obj.pose.p[..., :2] - self.goal_region.pose.p[..., :2], axis=1
+         )
+         place_reward = 1 - torch.tanh(5 * obj_to_goal_dist)
+-        reward += place_reward * reached
+ 
+-        # assign rewards to parallel environments that achieved success to the maximum of 3.
+-        reward[info["success"]] = 3
++        # Soft gate: use sigmoid of approach distance as continuous signal
++        grasp_quality = None
++        if self.gate_variant == "soft":
++            grasp_quality = torch.sigmoid(10.0 * (0.01 - tcp_to_push_pose_dist))
++
++        reward += apply_gate(
++            self.gate_variant,
++            place_reward,
++            reached,
++            grasp_quality=grasp_quality,
++            elapsed_steps=self.elapsed_steps,
++            max_steps=getattr(self.spec, 'max_episode_steps', 50),
++        )
++
++        reward = apply_terminal(self.terminal_variant, reward, info["success"], max_reward=3)
+         return reward
+ 
+     def compute_normalized_dense_reward(self, obs: Any, action: Array, info: Dict):
+diff --git a/mani_skill/envs/tasks/tabletop/stack_cube.py b/mani_skill/envs/tasks/tabletop/stack_cube.py
+index 12b90ab..f8a2371 100644
+--- a/mani_skill/envs/tasks/tabletop/stack_cube.py
++++ b/mani_skill/envs/tasks/tabletop/stack_cube.py
+@@ -6,6 +6,11 @@ import torch
+ 
+ from mani_skill.agents.robots import Fetch, Panda
+ from mani_skill.envs.sapien_env import BaseEnv
++from mani_skill.envs.tasks.tabletop.reward_variants import (
++    REACHING_VARIANTS,
++    apply_gate,
++    apply_terminal,
++)
+ from mani_skill.envs.utils import randomization
+ from mani_skill.sensors.camera import CameraConfig
+ from mani_skill.utils import common, sapien_utils
+@@ -36,9 +41,22 @@ class StackCubeEnv(BaseEnv):
+     agent: Union[Panda, Fetch]
+ 
+     def __init__(
+-        self, *args, robot_uids="panda_wristcam", robot_init_qpos_noise=0.02, **kwargs
++        self,
++        *args,
++        robot_uids="panda_wristcam",
++        robot_init_qpos_noise=0.02,
++        reach_variant="tanh",
++        gate_variant="hard",
++        terminal_variant="hard_jump",
++        **kwargs,
+     ):
+         self.robot_init_qpos_noise = robot_init_qpos_noise
++        if reach_variant not in REACHING_VARIANTS:
++            raise ValueError(f"Unknown reach_variant {reach_variant!r}. Valid: {list(REACHING_VARIANTS)}")
++        self.reach_fn = REACHING_VARIANTS[reach_variant]
++        self.reach_variant = reach_variant
++        self.gate_variant = gate_variant
++        self.terminal_variant = terminal_variant
+         super().__init__(*args, robot_uids=robot_uids, **kwargs)
+ 
+     @property
+@@ -147,7 +165,7 @@ class StackCubeEnv(BaseEnv):
+         tcp_pose = self.agent.tcp.pose.p
+         cubeA_pos = self.cubeA.pose.p
+         cubeA_to_tcp_dist = torch.linalg.norm(tcp_pose - cubeA_pos, axis=1)
+-        reward = 2 * (1 - torch.tanh(5 * cubeA_to_tcp_dist))
++        reward = 2 * self.reach_fn(cubeA_to_tcp_dist)
+ 
+         # grasp and place reward
+         cubeA_pos = self.cubeA.pose.p
+@@ -158,13 +176,28 @@ class StackCubeEnv(BaseEnv):
+         cubeA_to_goal_dist = torch.linalg.norm(goal_xyz - cubeA_pos, axis=1)
+         place_reward = 1 - torch.tanh(5.0 * cubeA_to_goal_dist)
+ 
+-        reward[info["is_cubeA_grasped"]] = (4 + place_reward)[info["is_cubeA_grasped"]]
++        is_cubeA_grasped = info["is_cubeA_grasped"]
++        gripper_width = (self.agent.robot.get_qlimits()[0, -1, 1] * 2).to(self.device)
++
++        # Continuous grasp quality for soft gate
++        grasp_quality = None
++        if self.gate_variant == "soft":
++            gripper_openness = torch.sum(self.agent.robot.get_qpos()[:, -2:], axis=1) / gripper_width
++            grasp_quality = torch.sigmoid(10.0 * (0.5 - gripper_openness))
++
++        gated_place = apply_gate(
++            self.gate_variant,
++            place_reward,
++            is_cubeA_grasped,
++            grasp_quality=grasp_quality,
++            elapsed_steps=self.elapsed_steps,
++            max_steps=getattr(self.spec, 'max_episode_steps', 50),
++        )
++        # StackCube: grasped phase overrides reward to 4 + place_reward
++        reward[is_cubeA_grasped] = (4 + gated_place)[is_cubeA_grasped]
+ 
+         # ungrasp and static reward
+-        gripper_width = (self.agent.robot.get_qlimits()[0, -1, 1] * 2).to(
+-            self.device
+-        )  # NOTE: hard-coded with panda
+-        is_cubeA_grasped = info["is_cubeA_grasped"]
++        # NOTE: hard-coded with panda gripper
+         ungrasp_reward = (
+             torch.sum(self.agent.robot.get_qpos()[:, -2:], axis=1) / gripper_width
+         )
+@@ -176,8 +209,7 @@ class StackCubeEnv(BaseEnv):
+             6 + (ungrasp_reward + static_reward) / 2.0
+         )[info["is_cubeA_on_cubeB"]]
+ 
+-        reward[info["success"]] = 8
+-
++        reward = apply_terminal(self.terminal_variant, reward, info["success"], max_reward=8)
+         return reward
+ 
+     def compute_normalized_dense_reward(

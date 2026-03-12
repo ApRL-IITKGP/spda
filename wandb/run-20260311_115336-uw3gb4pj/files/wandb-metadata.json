@@ -1,0 +1,63 @@
+{
+  "os":  "Linux-6.8.0-101-generic-x86_64-with-glibc2.35",
+  "python":  "CPython 3.9.25",
+  "startedAt":  "2026-03-11T06:23:36.120417Z",
+  "args":  [
+    "--env_id",
+    "PickCube-v1",
+    "--reach_variant",
+    "adaptive_concave_threshold",
+    "--gate_variant",
+    "hard",
+    "--terminal_variant",
+    "hard_jump",
+    "--num_envs",
+    "256",
+    "--total_timesteps",
+    "5000000",
+    "--track",
+    "--wandb_entity",
+    "swami2004",
+    "--wandb_project_name",
+    "REP",
+    "--wandb_group",
+    "REP",
+    "--seed",
+    "42"
+  ],
+  "program":  "/home/chomy/git/ManiSkill3/examples/baselines/ppo/ppo_fast.py",
+  "codePath":  "examples/baselines/ppo/ppo_fast.py",
+  "codePathLocal":  "examples/baselines/ppo/ppo_fast.py",
+  "git":  {
+    "remote":  "https://github.com/zhuoqun-chen/ManiSkill3.git",
+    "commit":  "3e948a52219f663456b74b500e25b5407a04a86a"
+  },
+  "email":  "swami2004@kgpian.iitkgp.ac.in",
+  "root":  "/home/chomy/git/ManiSkill3",
+  "host":  "chomy-OMEN-Gaming-Laptop-16-ae0xxx",
+  "executable":  "/home/chomy/anaconda3/envs/latentbc_vision/bin/python",
+  "cpu_count":  20,
+  "cpu_count_logical":  28,
+  "gpu":  "NVIDIA GeForce RTX 4070 Laptop GPU",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "772938588160",
+      "used":  "243732193280"
+    }
+  },
+  "memory":  {
+    "total":  "16453644288"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA GeForce RTX 4070 Laptop GPU",
+      "memoryTotal":  "8585740288",
+      "cudaCores":  4608,
+      "architecture":  "Ada",
+      "uuid":  "GPU-23ef8fd8-8f0b-7ee7-7d22-bc82ceee4dce"
+    }
+  ],
+  "cudaVersion":  "13.1",
+  "writerId":  "dd75kg8j9kwc8etpgi3yejc05mfx65fc"
+}

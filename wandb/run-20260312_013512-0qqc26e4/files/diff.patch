@@ -1,0 +1,46 @@
+diff --git a/mani_skill/envs/tasks/tabletop/lift_peg_upright.py b/mani_skill/envs/tasks/tabletop/lift_peg_upright.py
+index fb6f312..161b3e6 100644
+--- a/mani_skill/envs/tasks/tabletop/lift_peg_upright.py
++++ b/mani_skill/envs/tasks/tabletop/lift_peg_upright.py
+@@ -14,6 +14,13 @@ from mani_skill.utils.geometry import rotation_conversions
+ from mani_skill.utils.registration import register_env
+ from mani_skill.utils.sapien_utils import look_at
+ from mani_skill.utils.scene_builder.table import TableSceneBuilder
++from mani_skill.envs.tasks.tabletop.reward_variants import (
++    REACHING_VARIANTS,
++    ADAPTIVE_REACHING_VARIANTS,
++    VALID_REACHING_VARIANTS,
++    apply_gate,
++    apply_terminal,
++)
+ from mani_skill.utils.structs.pose import Pose
+ from mani_skill.utils.structs.types import Array
+ 
+@@ -38,8 +45,26 @@ class LiftPegUprightEnv(BaseEnv):
+     peg_half_width = 0.025
+     peg_half_length = 0.12
+ 
+-    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
++    def __init__(
++        self,
++        *args,
++        robot_uids="panda",
++        robot_init_qpos_noise=0.02,
++        reach_variant="tanh",
++        gate_variant="hard",
++        terminal_variant="hard_jump",
++        **kwargs,
++    ):
+         self.robot_init_qpos_noise = robot_init_qpos_noise
++        if reach_variant not in VALID_REACHING_VARIANTS:
++            raise ValueError(f"Unknown reach_variant {reach_variant!r}. Valid: {VALID_REACHING_VARIANTS}")
++        if reach_variant in ADAPTIVE_REACHING_VARIANTS:
++            self.reach_fn = ADAPTIVE_REACHING_VARIANTS[reach_variant]()
++        else:
++            self.reach_fn = REACHING_VARIANTS[reach_variant]
++        self.reach_variant = reach_variant
++        self.gate_variant = gate_variant
++        self.terminal_variant = terminal_variant
+         super().__init__(*args, robot_uids=robot_uids, **kwargs)
+ 
+     @property

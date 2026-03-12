@@ -1,0 +1,1038 @@
+warning: LF will be replaced by CRLF in paper/rep.aux.
+The file will have its original line endings in your working directory
+warning: LF will be replaced by CRLF in paper/rep.bib.
+The file will have its original line endings in your working directory
+warning: LF will be replaced by CRLF in paper/rep.log.
+The file will have its original line endings in your working directory
+warning: LF will be replaced by CRLF in paper/rep.out.
+The file will have its original line endings in your working directory
+diff --git a/mani_skill/envs/tasks/tabletop/reward_variants/__init__.py b/mani_skill/envs/tasks/tabletop/reward_variants/__init__.py
+index f27a8e9..c9df4c4 100644
+--- a/mani_skill/envs/tasks/tabletop/reward_variants/__init__.py
++++ b/mani_skill/envs/tasks/tabletop/reward_variants/__init__.py
+@@ -27,6 +27,8 @@ from .reaching import (
+     VALID_REACHING_VARIANTS,
+     AdaptiveStageReward,
+     AdaptiveConcaveStageReward,
++    AdaptiveDistanceReward,
++    AdaptiveEMAReward,
+ )
+ from .gating import apply_gate, VALID_GATE_VARIANTS
+ from .terminal import apply_terminal, VALID_TERMINAL_VARIANTS
+@@ -37,6 +39,8 @@ __all__ = [
+     "VALID_REACHING_VARIANTS",
+     "AdaptiveStageReward",
+     "AdaptiveConcaveStageReward",
++    "AdaptiveDistanceReward",
++    "AdaptiveEMAReward",
+     "apply_gate",
+     "VALID_GATE_VARIANTS",
+     "apply_terminal",
+diff --git a/mani_skill/envs/tasks/tabletop/reward_variants/reaching.py b/mani_skill/envs/tasks/tabletop/reward_variants/reaching.py
+index a4677c4..107a95c 100644
+--- a/mani_skill/envs/tasks/tabletop/reward_variants/reaching.py
++++ b/mani_skill/envs/tasks/tabletop/reward_variants/reaching.py
+@@ -263,6 +263,81 @@ class AdaptiveConcaveStageReward:
+         )
+ 
+ 
++class AdaptiveDistanceReward:
++    """k(d) = k_min + (k_max - k_min) * exp(-alpha * d)
++
++    tanh mode:    r(d) = 1 - tanh(k(d) * d)
++    concave mode: r(d) = clamp(1 - (k(d) * d)^2, 0, 1)   ← concave-truncated parabola
++
++    Wide gradient far from goal (k→k_min), tight near goal (k→k_max).
++    Stage resets are automatic: when d jumps to large on sub-goal switch, k drops to k_min.
++    No state, no clock — purely reactive to current distance.
++    """
++
++    def __init__(self, k_min: float = 2.0, k_max: float = 20.0, alpha: float = 10.0, mode: str = "tanh"):
++        assert mode in ("tanh", "concave"), f"Unknown mode {mode!r}"
++        self.k_min = k_min
++        self.k_max = k_max
++        self.alpha = alpha
++        self.mode = mode
++
++    def __call__(self, d: torch.Tensor) -> torch.Tensor:
++        k = self.k_min + (self.k_max - self.k_min) * torch.exp(-self.alpha * d)
++        if self.mode == "concave":
++            return torch.clamp(1.0 - (k * d) ** 2, 0.0, 1.0)
++        return 1.0 - torch.tanh(k * d)
++
++    def __repr__(self) -> str:
++        return (
++            f"AdaptiveDistanceReward(mode={self.mode!r}, k_min={self.k_min}, k_max={self.k_max}, alpha={self.alpha})"
++        )
++
++
++class AdaptiveEMAReward:
++    """EMA of reaching reward drives k.
++
++    k = k_min + (k_max - k_min) * ema
++
++    tanh mode:    r(d) = 1 - tanh(k * d)
++    concave mode: r(d) = clamp(1 - (k * d)^2, 0, 1)   ← concave-truncated parabola
++
++    If the policy hovers at a constant low reward, EMA plateaus → k stays wide → no
++    false tightening. When the policy improves (higher r), EMA rises → k tightens.
++    EMA resets to 0 at episode start (detected via elapsed_steps == 1).
++    """
++
++    def __init__(self, k_min: float = 2.0, k_max: float = 20.0, beta: float = 0.95, mode: str = "tanh"):
++        assert mode in ("tanh", "concave"), f"Unknown mode {mode!r}"
++        self.k_min = k_min
++        self.k_max = k_max
++        self.beta = beta
++        self.mode = mode
++        self._ema = None  # lazily initialized to [num_envs] float tensor
++
++    def prepare(self, elapsed_steps: torch.Tensor, max_episode_steps: int) -> None:
++        if self._ema is None:
++            self._ema = torch.zeros_like(elapsed_steps, dtype=torch.float32)
++        # Reset EMA for envs on first step of a new episode
++        reset_mask = elapsed_steps == 1
++        self._ema[reset_mask] = 0.0
++
++    def __call__(self, d: torch.Tensor) -> torch.Tensor:
++        k = self.k_min + (self.k_max - self.k_min) * self._ema
++        if self.mode == "concave":
++            r = torch.clamp(1.0 - (k * d) ** 2, 0.0, 1.0)
++        else:
++            r = 1.0 - torch.tanh(k * d)
++        self._ema = self.beta * self._ema + (1.0 - self.beta) * r.detach()
++        return r
++
++    def __repr__(self) -> str:
++        ema_mean = float(self._ema.mean()) if self._ema is not None else 0.0
++        return (
++            f"AdaptiveEMAReward(mode={self.mode!r}, k_min={self.k_min}, k_max={self.k_max}, "
++            f"beta={self.beta}, ema={ema_mean:.3f})"
++        )
++
++
+ REACHING_VARIANTS = {
+     # Baseline: smooth sigmoid, monotone decreasing, bounded [0,1]
+     "tanh": lambda d: 1.0 - torch.tanh(5.0 * d),
+@@ -389,6 +464,28 @@ ADAPTIVE_REACHING_VARIANTS = {
+     "adaptive_concave_stage": lambda: AdaptiveConcaveStageReward(
+         r_initial=0.2, r_final=0.1,
+     ),
++
++    # --- Distance-reactive annealing (no state, no clock) ---
++    # k(d) = k_min + (k_max - k_min) * exp(-alpha * d)
++    # Wide gradient far from goal, tight near goal. Stage resets automatic via d jump.
++    "adaptive_tanh_distance": lambda: AdaptiveDistanceReward(
++        k_min=2.0, k_max=20.0, alpha=10.0,
++    ),
++    # concave variant: uses d^2 inside tanh → zero gradient at goal, peak gradient at d>0
++    "adaptive_concave_distance": lambda: AdaptiveDistanceReward(
++        k_min=2.0, k_max=20.0, alpha=10.0, mode="concave",
++    ),
++
++    # --- EMA-driven annealing (stateful per-env) ---
++    # k driven by EMA of recent reaching rewards. Stalls (constant low reward) keep k wide.
++    # EMA resets to 0 at episode start.
++    "adaptive_tanh_reward_ema": lambda: AdaptiveEMAReward(
++        k_min=2.0, k_max=20.0, beta=0.95,
++    ),
++    # concave variant: uses d^2 inside tanh
++    "adaptive_concave_reward_ema": lambda: AdaptiveEMAReward(
++        k_min=2.0, k_max=20.0, beta=0.95, mode="concave",
++    ),
+ }
+ 
+ VALID_REACHING_VARIANTS = (
+diff --git a/paper/rep.aux b/paper/rep.aux
+index 9dae53e..bbf9bad 100644
+--- a/paper/rep.aux
++++ b/paper/rep.aux
+@@ -26,94 +26,115 @@
+ \citation{ma2024eureka}
+ \citation{andrychowicz2020matters}
+ \citation{maniskill3}
+-\@writefile{toc}{\contentsline {paragraph}{Contributions (planned).}{2}{section*.1}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Preliminary note.}{2}{section*.2}\protected@file@percent }
++\citation{zhuang2024drs}
++\citation{demir2024hprs}
++\citation{selfadaptive2024}
++\citation{bacon2017option}
++\citation{nachum2018hiro}
++\citation{andrychowicz2017her}
++\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.1}\protected@file@percent }
+ \@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
+ \newlabel{sec:related}{{2}{2}{Related Work}{section.2}{}}
+-\@writefile{toc}{\contentsline {paragraph}{Reward shaping theory.}{2}{section*.3}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Automated reward design.}{2}{section*.4}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Empirical studies of RL design choices.}{2}{section*.5}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Simulation infrastructure.}{2}{section*.6}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Concurrent work.}{2}{section*.7}\protected@file@percent }
+-\citation{schulman2017ppo}
+-\citation{haarnoja2018sac}
++\@writefile{toc}{\contentsline {paragraph}{Reward shaping theory.}{2}{section*.2}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Automated reward design.}{2}{section*.3}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Empirical studies of RL design choices.}{2}{section*.4}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Simulation infrastructure.}{2}{section*.5}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Hierarchical task reward design.}{2}{section*.6}\protected@file@percent }
++\citation{narvekar2020curriculum}
++\citation{hao2025toddler}
++\@writefile{toc}{\contentsline {paragraph}{Hierarchical reinforcement learning.}{3}{section*.7}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Curriculum learning.}{3}{section*.8}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Concurrent work.}{3}{section*.9}\protected@file@percent }
+ \@writefile{toc}{\contentsline {section}{\numberline {3}Reward Geometry Taxonomy}{3}{section.3}\protected@file@percent }
+ \newlabel{sec:taxonomy}{{3}{3}{Reward Geometry Taxonomy}{section.3}{}}
+ \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Dimension 1: Reaching Shape}{3}{subsection.3.1}\protected@file@percent }
+ \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Reaching reward shape variants. All satisfy $r_d(0) = 1$. $\nabla r_d|_{d=0}$ is the gradient at the goal.}}{3}{table.1}\protected@file@percent }
+ \newlabel{tab:reach}{{1}{3}{Reaching reward shape variants. All satisfy $r_d(0) = 1$. $\nabla r_d|_{d=0}$ is the gradient at the goal}{table.1}{}}
+ \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Dimension 2: Stage Gating}{3}{subsection.3.2}\protected@file@percent }
+-\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Dimension 3: Terminal Bonus}{3}{subsection.3.3}\protected@file@percent }
+-\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Dimension 4: Normalization}{3}{subsection.3.4}\protected@file@percent }
+-\newlabel{sec:norm}{{3.4}{3}{Dimension 4: Normalization}{subsection.3.4}{}}
+-\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup}{3}{section.4}\protected@file@percent }
+-\newlabel{sec:setup}{{4}{3}{Experimental Setup}{section.4}{}}
+-\@writefile{toc}{\contentsline {paragraph}{Tasks.}{3}{section*.8}\protected@file@percent }
+-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Key reach variants on PickCube-v1. Mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. \texttt  {adaptive\_tanh\_episode} (green, bold) is the only variant that achieves near-perfect success consistently across all seeds.}}{4}{figure.1}\protected@file@percent }
+-\newlabel{fig:main}{{1}{4}{Key reach variants on PickCube-v1. Mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. \texttt {adaptive\_tanh\_episode} (green, bold) is the only variant that achieves near-perfect success consistently across all seeds}{figure.1}{}}
+-\@writefile{toc}{\contentsline {paragraph}{Algorithm.}{4}{section*.9}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Infrastructure.}{4}{section*.10}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Evaluation.}{4}{section*.11}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{Compute.}{4}{section*.12}\protected@file@percent }
+-\@writefile{toc}{\contentsline {section}{\numberline {5}Results: Reach Shape Ablation on PickCube-v1}{4}{section.5}\protected@file@percent }
+-\newlabel{sec:results}{{5}{4}{Results: Reach Shape Ablation on PickCube-v1}{section.5}{}}
+-\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Findings}{4}{subsection.5.1}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{F1 — Hover attractors cause initialisation-dependent failure.}{4}{section*.13}\protected@file@percent }
++\citation{schulman2017ppo}
++\citation{haarnoja2018sac}
++\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Dimension 3: Terminal Bonus}{4}{subsection.3.3}\protected@file@percent }
++\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Dimension 4: Normalization}{4}{subsection.3.4}\protected@file@percent }
++\newlabel{sec:norm}{{3.4}{4}{Dimension 4: Normalization}{subsection.3.4}{}}
++\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup}{4}{section.4}\protected@file@percent }
++\newlabel{sec:setup}{{4}{4}{Experimental Setup}{section.4}{}}
++\@writefile{toc}{\contentsline {paragraph}{Tasks.}{4}{section*.10}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Algorithm.}{4}{section*.11}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Infrastructure.}{4}{section*.12}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Evaluation.}{4}{section*.13}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{Compute.}{4}{section*.14}\protected@file@percent }
++\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{4}{section.5}\protected@file@percent }
++\newlabel{sec:results}{{5}{4}{Results}{section.5}{}}
++\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}PickCube-v1: Reach Shape Ablation}{4}{subsection.5.1}\protected@file@percent }
++\newlabel{sec:pickcube}{{5.1}{4}{PickCube-v1: Reach Shape Ablation}{subsection.5.1}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Key reach variants on PickCube-v1. Mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. \texttt  {adaptive\_tanh\_episode} (green, bold) is the only variant that achieves near-perfect success consistently across all seeds.}}{5}{figure.1}\protected@file@percent }
++\newlabel{fig:main}{{1}{5}{Key reach variants on PickCube-v1. Mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. \texttt {adaptive\_tanh\_episode} (green, bold) is the only variant that achieves near-perfect success consistently across all seeds}{figure.1}{}}
+ \@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Per-seed learning curves for three representative variants. Seed\nobreakspace  {}1 is a hard initialisation on which \texttt  {tanh} and \texttt  {concave\_truncated} both struggle; \texttt  {adaptive\_tanh\_episode} reaches 1.0 on all three seeds.}}{5}{figure.2}\protected@file@percent }
+ \newlabel{fig:per_seed}{{2}{5}{Per-seed learning curves for three representative variants. Seed~1 is a hard initialisation on which \texttt {tanh} and \texttt {concave\_truncated} both struggle; \texttt {adaptive\_tanh\_episode} reaches 1.0 on all three seeds}{figure.2}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Adaptive curriculum variants versus static baselines. The linear schedule (\texttt  {adaptive\_concave\_linear}) collapses because it shrinks the support radius continuously regardless of learning progress. The threshold schedule (\texttt  {adaptive\_concave\_threshold}) fails on seed\nobreakspace  {}1 due to a chicken-and-egg: it requires success to narrow the radius, but needs the narrow radius to achieve success. Within-episode annealing (\texttt  {adaptive\_tanh\_episode}) breaks the deadlock by delivering the full wide-to-narrow curriculum in every episode from the start of training.}}{5}{figure.3}\protected@file@percent }
+-\newlabel{fig:adaptive}{{3}{5}{Adaptive curriculum variants versus static baselines. The linear schedule (\texttt {adaptive\_concave\_linear}) collapses because it shrinks the support radius continuously regardless of learning progress. The threshold schedule (\texttt {adaptive\_concave\_threshold}) fails on seed~1 due to a chicken-and-egg: it requires success to narrow the radius, but needs the narrow radius to achieve success. Within-episode annealing (\texttt {adaptive\_tanh\_episode}) breaks the deadlock by delivering the full wide-to-narrow curriculum in every episode from the start of training}{figure.3}{}}
+-\@writefile{toc}{\contentsline {paragraph}{F2 — Finite support prevents hover attractors but causes mode-switching instability.}{5}{section*.14}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{F1 — Hover attractors cause initialisation-dependent failure.}{5}{section*.15}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{F2 — Finite support prevents hover attractors but causes mode-switching instability.}{5}{section*.16}\protected@file@percent }
+ \citation{ng1999shaping}
+-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Final \texttt  {eval/success\_once} at 5M steps (PickCube-v1). Seeds $\{1, 42, 123\}$ where available; $n$ denotes number of seeds run.}}{6}{table.2}\protected@file@percent }
+-\newlabel{tab:multiseed}{{2}{6}{Final \texttt {eval/success\_once} at 5M steps (PickCube-v1). Seeds $\{1, 42, 123\}$ where available; $n$ denotes number of seeds run}{table.2}{}}
+-\@writefile{toc}{\contentsline {paragraph}{F3 — The robustness-ceiling tradeoff is fundamental.}{6}{section*.15}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{F4 — Near-goal curvature does not independently predict performance.}{6}{section*.16}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{F5 — Progress-gated support narrowing fails on hard seeds (chicken-and-egg).}{6}{section*.17}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{F6 — Within-episode annealing resolves the tradeoff.}{6}{section*.18}\protected@file@percent }
+-\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Cross-Task Validation: StackCube-v1}{7}{subsection.5.2}\protected@file@percent }
+-\newlabel{sec:stackcube}{{5.2}{7}{Cross-Task Validation: StackCube-v1}{subsection.5.2}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces StackCube-v1: \texttt  {eval/success\_once} mean $\pm $ 95\% CI. \texttt  {concave\_truncated} dominates; \texttt  {adaptive\_tanh\_episode}---the best variant on all other tasks---nearly completely fails here.}}{7}{figure.4}\protected@file@percent }
+-\newlabel{fig:stackcube_main}{{4}{7}{StackCube-v1: \texttt {eval/success\_once} mean $\pm $ 95\% CI. \texttt {concave\_truncated} dominates; \texttt {adaptive\_tanh\_episode}---the best variant on all other tasks---nearly completely fails here}{figure.4}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces StackCube-v1 per-seed curves. \texttt  {concave\_truncated} learns reliably across all seeds. \texttt  {adaptive\_tanh\_episode} is near-zero on seeds 42 and 123 where \texttt  {tanh} recovers---a complete inversion of the PickCube ranking.}}{7}{figure.5}\protected@file@percent }
+-\newlabel{fig:stackcube_per_seed}{{5}{7}{StackCube-v1 per-seed curves. \texttt {concave\_truncated} learns reliably across all seeds. \texttt {adaptive\_tanh\_episode} is near-zero on seeds 42 and 123 where \texttt {tanh} recovers---a complete inversion of the PickCube ranking}{figure.5}{}}
+-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Final \texttt  {eval/success\_once} at 5M steps on StackCube-v1.}}{7}{table.3}\protected@file@percent }
+-\newlabel{tab:stackcube}{{3}{7}{Final \texttt {eval/success\_once} at 5M steps on StackCube-v1}{table.3}{}}
+-\@writefile{toc}{\contentsline {paragraph}{F9 --- Within-episode annealing catastrophically fails on hierarchical tasks.}{7}{section*.19}\protected@file@percent }
+-\@writefile{toc}{\contentsline {paragraph}{F10 --- Finite support is optimal for hierarchical manipulation.}{8}{section*.20}\protected@file@percent }
+-\@writefile{toc}{\contentsline {section}{\numberline {6}Planned Experiments}{8}{section.6}\protected@file@percent }
+-\newlabel{sec:planned}{{6}{8}{Planned Experiments}{section.6}{}}
+-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Phase 1: Full reach shape sweep with multi-seed validation}{8}{subsection.6.1}\protected@file@percent }
+-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Phase 2: Gating and terminal dimensions}{8}{subsection.6.2}\protected@file@percent }
+-\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Phase 3: Cross-task transfer}{8}{subsection.6.3}\protected@file@percent }
+-\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Phase 4: Algorithm generalization}{8}{subsection.6.4}\protected@file@percent }
+-\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Phase 5: Playbook and sim-to-real (stretch)}{8}{subsection.6.5}\protected@file@percent }
+-\@writefile{toc}{\contentsline {section}{\numberline {7}Discussion and Open Questions}{9}{section.7}\protected@file@percent }
+-\newlabel{sec:discussion}{{7}{9}{Discussion and Open Questions}{section.7}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Training Success Rates: Compare this against the evaluation success plot in Figure\nobreakspace  {}\ref  {fig:main} to observe the train/eval success gap, providing insights into potential reward hacking under different shaping strategies.}}{9}{figure.6}\protected@file@percent }
+-\newlabel{fig:train_eval_gap}{{6}{9}{Training Success Rates: Compare this against the evaluation success plot in Figure~\ref {fig:main} to observe the train/eval success gap, providing insights into potential reward hacking under different shaping strategies}{figure.6}{}}
+-\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Cross-Task Validation: LiftPegUpright-v1}{9}{subsection.7.1}\protected@file@percent }
+-\newlabel{sec:liftpeg}{{7.1}{9}{Cross-Task Validation: LiftPegUpright-v1}{subsection.7.1}{}}
+-\@writefile{toc}{\contentsline {paragraph}{F7 --- Hover attractor severity scales with reaching reward dominance.}{9}{section*.21}\protected@file@percent }
+-\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Training Returns (PickCube)}}{10}{figure.7}\protected@file@percent }
+-\newlabel{fig:train_return}{{7}{10}{Training Returns (PickCube)}{figure.7}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Evaluation Returns (PickCube)}}{10}{figure.8}\protected@file@percent }
+-\newlabel{fig:eval_return}{{8}{10}{Evaluation Returns (PickCube)}{figure.8}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces PushCube-v1 Validation: \texttt  {adaptive\_tanh\_episode} maintains high performance ($0.958 \pm 0.029$) compared to standard \texttt  {tanh} ($0.854 \pm 0.128$), demonstrating the robustness of within-episode annealing across different task stages (repositioning vs.\ grasping).}}{10}{figure.9}\protected@file@percent }
+-\newlabel{fig:pushcube_success}{{9}{10}{PushCube-v1 Validation: \texttt {adaptive\_tanh\_episode} maintains high performance ($0.958 \pm 0.029$) compared to standard \texttt {tanh} ($0.854 \pm 0.128$), demonstrating the robustness of within-episode annealing across different task stages (repositioning vs.\ grasping)}{figure.9}{}}
+-\@writefile{toc}{\contentsline {paragraph}{F8 --- Within-episode annealing provides consistent gains across task types.}{10}{section*.22}\protected@file@percent }
+-\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces PushCube Training Returns}}{11}{figure.10}\protected@file@percent }
+-\newlabel{fig:pushcube_train_return}{{10}{11}{PushCube Training Returns}{figure.10}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces PushCube Eval Returns}}{11}{figure.11}\protected@file@percent }
+-\newlabel{fig:pushcube_eval_return}{{11}{11}{PushCube Eval Returns}{figure.11}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces LiftPegUpright-v1: \texttt  {eval/success\_once} mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. Both variants reach similar final success rates, but \texttt  {adaptive\_tanh\_episode} converges more reliably and shows lower inter-seed variance.}}{11}{figure.12}\protected@file@percent }
+-\newlabel{fig:liftpeg_main}{{12}{11}{LiftPegUpright-v1: \texttt {eval/success\_once} mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. Both variants reach similar final success rates, but \texttt {adaptive\_tanh\_episode} converges more reliably and shows lower inter-seed variance}{figure.12}{}}
+-\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{11}{section.8}\protected@file@percent }
+-\newlabel{sec:conclusion}{{8}{11}{Conclusion}{section.8}{}}
+-\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces LiftPegUpright-v1 per-seed curves. Unlike PickCube, seed\nobreakspace  {}1 is no longer a hard seed for either variant, suggesting that the hover attractor mechanism is diluted when reaching is not the dominant reward component.}}{12}{figure.13}\protected@file@percent }
+-\newlabel{fig:liftpeg_per_seed}{{13}{12}{LiftPegUpright-v1 per-seed curves. Unlike PickCube, seed~1 is no longer a hard seed for either variant, suggesting that the hover attractor mechanism is diluted when reaching is not the dominant reward component}{figure.13}{}}
+-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Final \texttt  {eval/success\_once} at 5M steps on LiftPegUpright-v1.}}{12}{table.4}\protected@file@percent }
+-\newlabel{tab:liftpeg}{{4}{12}{Final \texttt {eval/success\_once} at 5M steps on LiftPegUpright-v1}{table.4}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Adaptive curriculum variants versus static baselines. The linear schedule (\texttt  {adaptive\_concave\_linear}) collapses because it shrinks the support radius continuously regardless of learning progress. The threshold schedule (\texttt  {adaptive\_concave\_threshold}) fails on seed\nobreakspace  {}1 due to a chicken-and-egg: it requires success to narrow the radius, but needs the narrow radius to achieve success. Within-episode annealing (\texttt  {adaptive\_tanh\_episode}) breaks the deadlock by delivering the full wide-to-narrow curriculum in every episode from the start of training.}}{6}{figure.3}\protected@file@percent }
++\newlabel{fig:adaptive}{{3}{6}{Adaptive curriculum variants versus static baselines. The linear schedule (\texttt {adaptive\_concave\_linear}) collapses because it shrinks the support radius continuously regardless of learning progress. The threshold schedule (\texttt {adaptive\_concave\_threshold}) fails on seed~1 due to a chicken-and-egg: it requires success to narrow the radius, but needs the narrow radius to achieve success. Within-episode annealing (\texttt {adaptive\_tanh\_episode}) breaks the deadlock by delivering the full wide-to-narrow curriculum in every episode from the start of training}{figure.3}{}}
++\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Final \texttt  {eval/success\_once} at 5M steps (PickCube-v1). Seeds $\{1, 42, 123\}$ where available.}}{6}{table.2}\protected@file@percent }
++\newlabel{tab:multiseed}{{2}{6}{Final \texttt {eval/success\_once} at 5M steps (PickCube-v1). Seeds $\{1, 42, 123\}$ where available}{table.2}{}}
++\@writefile{toc}{\contentsline {paragraph}{F3 — The robustness-ceiling tradeoff is fundamental.}{6}{section*.17}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{F4 — Near-goal curvature does not independently predict performance.}{6}{section*.18}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{F5 — Progress-gated support narrowing fails on hard seeds (chicken-and-egg).}{7}{section*.19}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{F6 — Within-episode annealing resolves the tradeoff.}{7}{section*.20}\protected@file@percent }
++\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Cross-Task Validation: PushCube-v1}{7}{subsection.5.2}\protected@file@percent }
++\newlabel{sec:pushcube}{{5.2}{7}{Cross-Task Validation: PushCube-v1}{subsection.5.2}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces PushCube-v1: \texttt  {adaptive\_tanh\_episode} maintains high performance ($0.958 \pm 0.029$) compared to standard \texttt  {tanh} ($0.854 \pm 0.128$), demonstrating the robustness of within-episode annealing on a non-grasping task.}}{7}{figure.4}\protected@file@percent }
++\newlabel{fig:pushcube_success}{{4}{7}{PushCube-v1: \texttt {adaptive\_tanh\_episode} maintains high performance ($0.958 \pm 0.029$) compared to standard \texttt {tanh} ($0.854 \pm 0.128$), demonstrating the robustness of within-episode annealing on a non-grasping task}{figure.4}{}}
++\@writefile{toc}{\contentsline {paragraph}{F7 --- Hover attractor failure generalises to non-grasping tasks.}{7}{section*.21}\protected@file@percent }
++\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces PushCube Training Returns}}{8}{figure.5}\protected@file@percent }
++\newlabel{fig:pushcube_train_return}{{5}{8}{PushCube Training Returns}{figure.5}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces PushCube Eval Returns}}{8}{figure.6}\protected@file@percent }
++\newlabel{fig:pushcube_eval_return}{{6}{8}{PushCube Eval Returns}{figure.6}{}}
++\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Cross-Task Validation: LiftPegUpright-v1}{8}{subsection.5.3}\protected@file@percent }
++\newlabel{sec:liftpeg}{{5.3}{8}{Cross-Task Validation: LiftPegUpright-v1}{subsection.5.3}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces LiftPegUpright-v1: \texttt  {eval/success\_once} mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. Both variants reach similar final success rates, but \texttt  {adaptive\_tanh\_episode} converges more reliably and shows lower inter-seed variance.}}{8}{figure.7}\protected@file@percent }
++\newlabel{fig:liftpeg_main}{{7}{8}{LiftPegUpright-v1: \texttt {eval/success\_once} mean $\pm $ 95\% CI over seeds $\{1, 42, 123\}$. Both variants reach similar final success rates, but \texttt {adaptive\_tanh\_episode} converges more reliably and shows lower inter-seed variance}{figure.7}{}}
++\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Final \texttt  {eval/success\_once} at 5M steps on LiftPegUpright-v1.}}{8}{table.3}\protected@file@percent }
++\newlabel{tab:liftpeg}{{3}{8}{Final \texttt {eval/success\_once} at 5M steps on LiftPegUpright-v1}{table.3}{}}
++\@writefile{toc}{\contentsline {paragraph}{F8 --- Hover attractor severity scales with reaching reward dominance.}{8}{section*.22}\protected@file@percent }
++\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces LiftPegUpright-v1 per-seed curves. Unlike PickCube, seed\nobreakspace  {}1 is no longer a hard seed for either variant, suggesting that the hover attractor mechanism is diluted when reaching is not the dominant reward component.}}{9}{figure.8}\protected@file@percent }
++\newlabel{fig:liftpeg_per_seed}{{8}{9}{LiftPegUpright-v1 per-seed curves. Unlike PickCube, seed~1 is no longer a hard seed for either variant, suggesting that the hover attractor mechanism is diluted when reaching is not the dominant reward component}{figure.8}{}}
++\@writefile{toc}{\contentsline {paragraph}{F9 --- Within-episode annealing provides consistent gains across task types.}{9}{section*.23}\protected@file@percent }
++\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Cross-Task Validation: StackCube-v1}{9}{subsection.5.4}\protected@file@percent }
++\newlabel{sec:stackcube}{{5.4}{9}{Cross-Task Validation: StackCube-v1}{subsection.5.4}{}}
++\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Final \texttt  {eval/success\_once} at 20M steps on StackCube-v1.}}{9}{table.4}\protected@file@percent }
++\newlabel{tab:stackcube}{{4}{9}{Final \texttt {eval/success\_once} at 20M steps on StackCube-v1}{table.4}{}}
++\@writefile{toc}{\contentsline {paragraph}{F10 --- Within-episode annealing catastrophically fails on hierarchical tasks.}{9}{section*.24}\protected@file@percent }
++\@writefile{toc}{\contentsline {paragraph}{F11 --- Finite support is optimal for hierarchical manipulation.}{9}{section*.25}\protected@file@percent }
++\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces StackCube-v1: \texttt  {eval/success\_once} mean $\pm $ 95\% CI. \texttt  {concave\_truncated} dominates; \texttt  {adaptive\_tanh\_episode}---the best variant on all flat tasks---nearly completely fails here.}}{10}{figure.9}\protected@file@percent }
++\newlabel{fig:stackcube_main}{{9}{10}{StackCube-v1: \texttt {eval/success\_once} mean $\pm $ 95\% CI. \texttt {concave\_truncated} dominates; \texttt {adaptive\_tanh\_episode}---the best variant on all flat tasks---nearly completely fails here}{figure.9}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces StackCube-v1 per-seed curves. \texttt  {concave\_truncated} learns reliably across all seeds. \texttt  {adaptive\_tanh\_episode} is near-zero on seeds 42 and 123 where \texttt  {tanh} recovers---a complete inversion of the PickCube ranking.}}{10}{figure.10}\protected@file@percent }
++\newlabel{fig:stackcube_per_seed}{{10}{10}{StackCube-v1 per-seed curves. \texttt {concave\_truncated} learns reliably across all seeds. \texttt {adaptive\_tanh\_episode} is near-zero on seeds 42 and 123 where \texttt {tanh} recovers---a complete inversion of the PickCube ranking}{figure.10}{}}
++\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Summary: Task-Structure-Dependent Playbook}{10}{subsection.5.5}\protected@file@percent }
++\newlabel{sec:playbook-summary}{{5.5}{10}{Summary: Task-Structure-Dependent Playbook}{subsection.5.5}{}}
++\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Cross-task summary. Best variant per task in bold.}}{10}{table.5}\protected@file@percent }
++\newlabel{tab:crosssummary}{{5}{10}{Cross-task summary. Best variant per task in bold}{table.5}{}}
++\@writefile{toc}{\contentsline {section}{\numberline {6}Planned Experiments}{11}{section.6}\protected@file@percent }
++\newlabel{sec:planned}{{6}{11}{Planned Experiments}{section.6}{}}
++\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Stage-Conditioned Annealing (\texttt  {adaptive\_tanh\_stage})}{11}{subsection.6.1}\protected@file@percent }
++\newlabel{sec:planned-stage}{{6.1}{11}{Stage-Conditioned Annealing (\texttt {adaptive\_tanh\_stage})}{subsection.6.1}{}}
++\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Predicted results for \texttt  {adaptive\_tanh\_stage}.}}{11}{table.6}\protected@file@percent }
++\newlabel{tab:predicted}{{6}{11}{Predicted results for \texttt {adaptive\_tanh\_stage}}{table.6}{}}
++\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}PlaceSphere-v1 (Three-Stage)}{11}{subsection.6.2}\protected@file@percent }
++\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Gating and Terminal Dimensions}{11}{subsection.6.3}\protected@file@percent }
++\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Algorithm Generalization}{12}{subsection.6.4}\protected@file@percent }
++\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Playbook and Sim-to-Real (Stretch)}{12}{subsection.6.5}\protected@file@percent }
++\@writefile{toc}{\contentsline {section}{\numberline {7}Discussion}{12}{section.7}\protected@file@percent }
++\newlabel{sec:discussion}{{7}{12}{Discussion}{section.7}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces PickCube training success rates. Compare against Figure\nobreakspace  {}\ref  {fig:main} (eval success) to observe the train/eval gap.}}{12}{figure.11}\protected@file@percent }
++\newlabel{fig:train_eval_gap}{{11}{12}{PickCube training success rates. Compare against Figure~\ref {fig:main} (eval success) to observe the train/eval gap}{figure.11}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces PickCube Training Returns}}{13}{figure.12}\protected@file@percent }
++\newlabel{fig:train_return}{{12}{13}{PickCube Training Returns}{figure.12}{}}
++\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces PickCube Evaluation Returns}}{13}{figure.13}\protected@file@percent }
++\newlabel{fig:eval_return}{{13}{13}{PickCube Evaluation Returns}{figure.13}{}}
++\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{13}{section.8}\protected@file@percent }
++\newlabel{sec:conclusion}{{8}{13}{Conclusion}{section.8}{}}
+ \bibdata{rep}
+ \bibcite{ma2024eureka}{{1}{2024}{{Ma et~al.}}{{Ma, Liang, Shi, Fan, and Anandkumar}}}
+ \bibcite{ng1999shaping}{{2}{1999}{{Ng et~al.}}{{Ng, Harada, and Russell}}}
+@@ -122,4 +143,8 @@
+ \bibcite{maniskill3}{{5}{2024}{{Gu et~al.}}{{}}}
+ \bibcite{schulman2017ppo}{{6}{2017}{{Schulman et~al.}}{{Schulman, Wolski, Dhariwal, Radford, and Klimov}}}
+ \bibcite{haarnoja2018sac}{{7}{2018}{{Haarnoja et~al.}}{{Haarnoja, Zhou, Abbeel, and Levine}}}
+-\gdef \@abspage@last{13}
++\@writefile{toc}{\contentsline {section}{\numberline {A}Supported Tasks and Stage Structure}{14}{appendix.A}\protected@file@percent }
++\newlabel{app:tasks}{{A}{14}{Supported Tasks and Stage Structure}{appendix.A}{}}
++\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces ManiSkill3 tasks with reward variant support.}}{14}{table.7}\protected@file@percent }
++\newlabel{tab:tasks}{{7}{14}{ManiSkill3 tasks with reward variant support}{table.7}{}}
++\gdef \@abspage@last{14}
+diff --git a/paper/rep.bib b/paper/rep.bib
+index bf7e25b..7f877f9 100644
+--- a/paper/rep.bib
++++ b/paper/rep.bib
+@@ -105,6 +105,44 @@
+   year={2020}
+ }
+ 
++@article{dierkes2024combining,
++  title={Combining Automated Optimisation of Hyperparameters and Reward Shape},
++  author={Dierkes, Malte and Cramer, Benjamin and Hoos, Holger H and Trimpe, Sebastian},
++  journal={Reinforcement Learning Journal},
++  year={2024},
++  note={arXiv:2406.18293}
++}
++
++@inproceedings{henderson2018matters,
++  title={Deep Reinforcement Learning that Matters},
++  author={Henderson, Peter and Islam, Riashat and Bachman, Philip and Pineau, Joelle and Precup, Doina and Meger, David},
++  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
++  year={2018},
++  note={arXiv:1709.06560}
++}
++
++@article{colas2018seeds,
++  title={How Many Random Seeds? Statistical Power Analysis in Deep Reinforcement Learning Experiments},
++  author={Colas, C{\'e}dric and Sigaud, Olivier and Oudeyer, Pierre-Yves},
++  journal={arXiv preprint arXiv:1806.08295},
++  year={2018}
++}
++
++@inproceedings{eysenbach2019sorb,
++  title={Search on the Replay Buffer: Bridging Planning and Reinforcement Learning},
++  author={Eysenbach, Benjamin and Salakhutdinov, Ruslan and Levine, Sergey},
++  booktitle={Advances in Neural Information Processing Systems (NeurIPS)},
++  year={2019},
++  note={arXiv:1906.05253}
++}
++
++@article{adamczyk2025bootstrapped,
++  title={Bootstrapped Reward Shaping},
++  author={Adamczyk, Jacob and others},
++  journal={arXiv preprint},
++  year={2025}
++}
++
+ @article{selfadaptive2024,
+   title={Self-Adaptive Reward Shaping for Efficient Reinforcement Learning},
+   author={Yu, Kun and others},
+diff --git a/paper/rep.log b/paper/rep.log
+index 8279e25..f57c4c6 100644
+--- a/paper/rep.log
++++ b/paper/rep.log
+@@ -1,4 +1,4 @@
+-This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.2.11)  12 MAR 2026 13:58
++This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.2.11)  12 MAR 2026 14:53
+ entering extended mode
+  restricted \write18 enabled.
+  %&-line parsing enabled.
+@@ -385,7 +385,7 @@ Package microtype Info: Loading configuration file microtype.cfg.
+ File: microtype.cfg 2021/12/10 v3.0b microtype main configuration file (RS)
+ ))
+ LaTeX Font Info:    Trying to load font information for OT1+ptm on input line 2
+-7.
++6.
+ 
+ (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ot1ptm.fd
+ File: ot1ptm.fd 2001/06/04 font definitions for OT1/ptm.
+@@ -398,24 +398,24 @@ File: l3backend-pdftex.def 2022-01-12 L3 backend support: PDF output (pdfTeX)
+ (./rep.aux)
+ \openout1 = `rep.aux'.
+ 
+-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
+-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 27.
+-LaTeX Font Info:    ... okay on input line 27.
++LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
++LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 26.
++LaTeX Font Info:    ... okay on input line 26.
+  (/usr/share/texlive/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
+ [Loading MPS to PDF converter (version 2006.09.02).]
+ \scratchcounter=\count301
+@@ -470,7 +470,7 @@ e
+ * \@reversemarginfalse
+ * (1in=72.27pt=25.4mm, 1cm=28.453pt)
+ 
+-Package hyperref Info: Link coloring ON on input line 27.
++Package hyperref Info: Link coloring ON on input line 26.
+ (/usr/share/texlive/texmf-dist/tex/latex/hyperref/nameref.sty
+ Package: nameref 2021-04-02 v2.47 Cross-referencing by name of section
+ 
+@@ -482,9 +482,9 @@ Package: gettitlestring 2019/12/15 v1.6 Cleanup title references (HO)
+ )
+ \c@section@level=\count307
+ )
+-LaTeX Info: Redefining \ref on input line 27.
+-LaTeX Info: Redefining \pageref on input line 27.
+-LaTeX Info: Redefining \nameref on input line 27.
++LaTeX Info: Redefining \ref on input line 26.
++LaTeX Info: Redefining \pageref on input line 26.
++LaTeX Info: Redefining \nameref on input line 26.
+ 
+ (./rep.out) (./rep.out)
+ \@outlinefile=\write3
+@@ -525,18 +525,18 @@ LaTeX Info: Redefining \nameref on input line 27.
+ * \@reversemarginfalse
+ * (1in=72.27pt=25.4mm, 1cm=28.453pt)
+ 
+-LaTeX Info: Redefining \microtypecontext on input line 27.
+-Package microtype Info: Applying patch `item' on input line 27.
+-Package microtype Info: Applying patch `toc' on input line 27.
+-Package microtype Info: Applying patch `eqnum' on input line 27.
+-Package microtype Info: Applying patch `footnote' on input line 27.
++LaTeX Info: Redefining \microtypecontext on input line 26.
++Package microtype Info: Applying patch `item' on input line 26.
++Package microtype Info: Applying patch `toc' on input line 26.
++Package microtype Info: Applying patch `eqnum' on input line 26.
++Package microtype Info: Applying patch `footnote' on input line 26.
+ Package microtype Info: Generating PDF output.
+ Package microtype Info: Character protrusion enabled (level 2).
+ Package microtype Info: Using default protrusion set `alltext'.
+ Package microtype Info: Automatic font expansion enabled (level 2),
+ (microtype)             stretch: 20, shrink: 20, step: 1, non-selected.
+ Package microtype Info: Using default expansion set `alltext-nott'.
+-LaTeX Info: Redefining \showhyphens on input line 27.
++LaTeX Info: Redefining \showhyphens on input line 26.
+ Package microtype Info: No adjustment of tracking.
+ Package microtype Info: No adjustment of interword spacing.
+ Package microtype Info: No adjustment of character kerning.
+@@ -547,7 +547,7 @@ File: mt-ptm.cfg 2006/04/20 v1.7 microtype config. file: Times (RS)
+ File: mt-cmr.cfg 2013/05/19 v2.2 microtype config. file: Computer Modern Roman 
+ (RS)
+ )
+-LaTeX Font Info:    Trying to load font information for U+msa on input line 28.
++LaTeX Font Info:    Trying to load font information for U+msa on input line 27.
+ 
+ 
+ (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd
+@@ -556,7 +556,7 @@ File: umsa.fd 2013/01/14 v3.01 AMS symbols A
+ (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msa.cfg
+ File: mt-msa.cfg 2006/02/04 v1.1 microtype config. file: AMS symbols (a) (RS)
+ )
+-LaTeX Font Info:    Trying to load font information for U+msb on input line 28.
++LaTeX Font Info:    Trying to load font information for U+msb on input line 27.
+ 
+ 
+ (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd
+@@ -570,7 +570,7 @@ Package microtype Info: Loading generic protrusion settings for font family
+ (microtype)             For optimal results, create family-specific settings.
+ (microtype)             See the microtype manual for details.
+ LaTeX Font Info:    Trying to load font information for OT1+phv on input line 5
+-1.
++2.
+ 
+ (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ot1phv.fd
+ File: ot1phv.fd 2020/03/25 scalable font definitions for OT1/phv.
+@@ -581,85 +581,132 @@ Package microtype Info: Loading generic protrusion settings for font family
+ (microtype)             See the microtype manual for details.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 73.
++Package xcolor Warning: Incompatible color definition on input line 74.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 75.
++Package xcolor Warning: Incompatible color definition on input line 76.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 75.
++Package xcolor Warning: Incompatible color definition on input line 76.
+ 
+ [1
+ 
+ 
+ {/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}]
+ LaTeX Font Info:    Trying to load font information for TS1+ptm on input line 8
+-2.
++3.
+ 
+ (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ts1ptm.fd
+ File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
+ )
+ 
+-Package xcolor Warning: Incompatible color definition on input line 82.
++Package xcolor Warning: Incompatible color definition on input line 83.
++
+ 
++Package xcolor Warning: Incompatible color definition on input line 84.
+ 
+-Package xcolor Warning: Incompatible color definition on input line 83.
++
++LaTeX Warning: Reference `app:tasks' on page 2 undefined on input line 91.
++
++
++Package xcolor Warning: Incompatible color definition on input line 109.
++
++
++Package xcolor Warning: Incompatible color definition on input line 111.
++
++
++Package xcolor Warning: Incompatible color definition on input line 116.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 86.
++Package xcolor Warning: Incompatible color definition on input line 124.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 112.
++Package xcolor Warning: Incompatible color definition on input line 130.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 114.
++Package natbib Warning: Citation `zhuang2024drs' on page 2 undefined on input l
++ine 135.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 119.
++Package natbib Warning: Citation `demir2024hprs' on page 2 undefined on input l
++ine 139.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 127.
++Package natbib Warning: Citation `selfadaptive2024' on page 2 undefined on inpu
++t line 142.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 133.
++Package natbib Warning: Citation `bacon2017option' on page 2 undefined on input
++ line 146.
++
++
++Package natbib Warning: Citation `nachum2018hiro' on page 2 undefined on input 
++line 146.
++
++
++Package natbib Warning: Citation `andrychowicz2017her' on page 2 undefined on i
++nput line 151.
+ 
+ [2]
+ 
+-Package xcolor Warning: Incompatible color definition on input line 157.
++Package natbib Warning: Citation `narvekar2020curriculum' on page 3 undefined o
++n input line 156.
++
++
++Package natbib Warning: Citation `hao2025toddler' on page 3 undefined on input 
++line 162.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 219.
++Package xcolor Warning: Incompatible color definition on input line 187.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 221.
++Overfull \hbox (3.96687pt too wide) in paragraph at lines 195--212
++ [][] 
++ []
+ 
+ [3]
+ 
+-Package xcolor Warning: Incompatible color definition on input line 245.
++LaTeX Warning: Reference `app:tasks' on page 4 undefined on input line 255.
++
++
++Package xcolor Warning: Incompatible color definition on input line 258.
++
++
++Package xcolor Warning: Incompatible color definition on input line 262.
++
+ 
++Underfull \hbox (badness 1248) in paragraph at lines 286--288
++\OT1/ptm/m/n/10 (+20) All ex-per-i-ments use \OT1/cmtt/m/n/10 gate=hard\OT1/ptm
++/m/n/10 (+20) , \OT1/cmtt/m/n/10 terminal=hard[]jump\OT1/ptm/m/n/10 (+20) , 256
++ par-al-lel en-vi-ron-ments, seeds
++ []
++
++
++Package xcolor Warning: Incompatible color definition on input line 294.
+ 
+-Package xcolor Warning: Incompatible color definition on input line 245.
+ 
++Package xcolor Warning: Incompatible color definition on input line 294.
+ 
+-Package xcolor Warning: Incompatible color definition on input line 246.
+ 
+-<fig_main.pdf, id=146, 578.16pt x 361.35pt>
++Package xcolor Warning: Incompatible color definition on input line 295.
++
++<fig_main.pdf, id=149, 578.16pt x 361.35pt>
+ File: fig_main.pdf Graphic file (type pdf)
+ <use fig_main.pdf>
+-Package pdftex.def Info: fig_main.pdf  used on input line 251.
++Package pdftex.def Info: fig_main.pdf  used on input line 300.
+ (pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
+-<fig_per_seed.pdf, id=147, 1084.05pt x 289.08pt>
++<fig_per_seed.pdf, id=150, 1084.05pt x 289.08pt>
+ File: fig_per_seed.pdf Graphic file (type pdf)
+ <use fig_per_seed.pdf>
+-Package pdftex.def Info: fig_per_seed.pdf  used on input line 260.
++Package pdftex.def Info: fig_per_seed.pdf  used on input line 309.
+ (pdftex.def)             Requested size: 397.48499pt x 105.99632pt.
+-<fig_adaptive.pdf, id=148, 578.16pt x 361.35pt>
++<fig_adaptive.pdf, id=151, 578.16pt x 361.35pt>
+ File: fig_adaptive.pdf Graphic file (type pdf)
+ <use fig_adaptive.pdf>
+-Package pdftex.def Info: fig_adaptive.pdf  used on input line 270.
++Package pdftex.def Info: fig_adaptive.pdf  used on input line 319.
+ (pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
+ 
+-Underfull \hbox (badness 3019) in paragraph at lines 279--279
++Underfull \hbox (badness 3019) in paragraph at lines 328--328
+ []\OT1/ptm/m/n/10 (+20) Figure 3: []Adaptive cur-ricu-lum vari-ants ver-sus sta
+ tic base-lines. The lin-ear sched-ule
+  []
+@@ -668,129 +715,154 @@ tic base-lines. The lin-ear sched-ule
+ LaTeX Warning: `h' float specifier changed to `ht'.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 311.
+-
+-[4 <./fig_main.pdf>] [5 <./fig_per_seed.pdf> <./fig_adaptive.pdf>]
++Package xcolor Warning: Incompatible color definition on input line 358.
+ 
+-Package xcolor Warning: Incompatible color definition on input line 329.
++[4] [5 <./fig_main.pdf> <./fig_per_seed.pdf>]
+ 
++Package xcolor Warning: Incompatible color definition on input line 376.
+ 
+-Underfull \hbox (badness 7759) in paragraph at lines 339--344
++[6 <./fig_adaptive.pdf>]
++Underfull \hbox (badness 7759) in paragraph at lines 386--391
+  []\OT1/ptm/b/n/10 (+20) F5 | Progress-gated sup-port nar-row-ing fails on hard
+  seeds (chicken-and-egg).[]
+  []
+ 
+-[6]
+-<fig_stackcube_main.pdf, id=327, 578.16pt x 361.35pt>
++<fig_pushcube_main.pdf, id=328, 578.16pt x 361.35pt>
++File: fig_pushcube_main.pdf Graphic file (type pdf)
++<use fig_pushcube_main.pdf>
++Package pdftex.def Info: fig_pushcube_main.pdf  used on input line 413.
++(pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
++<fig_pushcube_train_return_main.pdf, id=329, 578.16pt x 361.35pt>
++File: fig_pushcube_train_return_main.pdf Graphic file (type pdf)
++<use fig_pushcube_train_return_main.pdf>
++Package pdftex.def Info: fig_pushcube_train_return_main.pdf  used on input line
++ 434.
++(pdftex.def)             Requested size: 190.79109pt x 119.24036pt.
++<fig_pushcube_eval_return_main.pdf, id=330, 578.16pt x 361.35pt>
++File: fig_pushcube_eval_return_main.pdf Graphic file (type pdf)
++<use fig_pushcube_eval_return_main.pdf>
++Package pdftex.def Info: fig_pushcube_eval_return_main.pdf  used on input line 
++434.
++(pdftex.def)             Requested size: 190.79109pt x 119.24036pt.
++
++LaTeX Warning: `h' float specifier changed to `ht'.
++
++[7 <./fig_pushcube_main.pdf>]
++<fig_liftpeg_main.pdf, id=402, 578.16pt x 361.35pt>
++File: fig_liftpeg_main.pdf Graphic file (type pdf)
++<use fig_liftpeg_main.pdf>
++Package pdftex.def Info: fig_liftpeg_main.pdf  used on input line 454.
++(pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
++<fig_liftpeg_per_seed.pdf, id=403, 1084.05pt x 289.08pt>
++File: fig_liftpeg_per_seed.pdf Graphic file (type pdf)
++<use fig_liftpeg_per_seed.pdf>
++Package pdftex.def Info: fig_liftpeg_per_seed.pdf  used on input line 464.
++(pdftex.def)             Requested size: 397.48499pt x 105.99632pt.
++
++
++LaTeX Warning: `h' float specifier changed to `ht'.
++
++[8 <./fig_pushcube_train_return_main.pdf> <./fig_pushcube_eval_return_main.pdf>
++ <./fig_liftpeg_main.pdf>]
++<fig_stackcube_main.pdf, id=601, 578.16pt x 361.35pt>
+ File: fig_stackcube_main.pdf Graphic file (type pdf)
+ <use fig_stackcube_main.pdf>
+-Package pdftex.def Info: fig_stackcube_main.pdf  used on input line 373.
++Package pdftex.def Info: fig_stackcube_main.pdf  used on input line 519.
+ (pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
+-<fig_stackcube_per_seed.pdf, id=328, 1084.05pt x 289.08pt>
++
++
++LaTeX Warning: `h' float specifier changed to `ht'.
++
++<fig_stackcube_per_seed.pdf, id=602, 1084.05pt x 289.08pt>
+ File: fig_stackcube_per_seed.pdf Graphic file (type pdf)
+ <use fig_stackcube_per_seed.pdf>
+-Package pdftex.def Info: fig_stackcube_per_seed.pdf  used on input line 382.
++Package pdftex.def Info: fig_stackcube_per_seed.pdf  used on input line 528.
+ (pdftex.def)             Requested size: 397.48499pt x 105.99632pt.
+ 
+-Underfull \hbox (badness 10000) in paragraph at lines 409--412
+- []\OT1/ptm/b/n/10 (+20) F9 --- Within-episode an-neal-ing catas-troph-i-cally 
+-fails on hi-er-ar-chi-cal tasks.[]
++LaTeX Warning: `h' float specifier changed to `ht'.
++
++
++Underfull \hbox (badness 10000) in paragraph at lines 555--558
++ []\OT1/ptm/b/n/10 (+20) F10 --- Within-episode an-neal-ing catas-troph-i-cally
++ fails on hi-er-ar-chi-cal tasks.[]
+  []
+ 
+ 
+-Underfull \hbox (badness 1496) in paragraph at lines 409--412
++Underfull \hbox (badness 1496) in paragraph at lines 555--558
+ \OT1/cmtt/m/n/10 adaptive[]tanh[]episode \OT1/ptm/m/n/10 (+20) achieves mean $\
+ OT1/cmr/m/n/10 0\OML/cmm/m/it/10 :\OT1/cmr/m/n/10 021$ \OT1/ptm/m/n/10 (+20) on
+  StackCube---virtually zero---despite be-
+  []
+ 
+-[7 <./fig_stackcube_main.pdf> <./fig_stackcube_per_seed.pdf>]
++[9 <./fig_liftpeg_per_seed.pdf>]
++LaTeX Font Info:    Font shape `OT1/cmtt/bx/n' in size <9> not available
++(Font)              Font shape `OT1/cmtt/m/n' tried instead on input line 590.
+ 
+-Package xcolor Warning: Incompatible color definition on input line 450.
++Underfull \hbox (badness 7740) in paragraph at lines 603--605
++[]\OT1/ptm/b/n/10 (+20) Flat tasks \OT1/ptm/m/n/10 (+20) (Pick-Cube, PushCube, 
++Lift-PegUpright): within-episode an-neal-ing
++ []
++
++[10 <./fig_stackcube_main.pdf> <./fig_stackcube_per_seed.pdf>]
++
++Package xcolor Warning: Incompatible color definition on input line 610.
++
++LaTeX Font Info:    Font shape `OT1/cmtt/bx/n' in size <10> not available
++(Font)              Font shape `OT1/cmtt/m/n' tried instead on input line 617.
++
++Underfull \hbox (badness 7595) in paragraph at lines 635--638
++[]\OT1/ptm/m/n/10 (+20) On single-stage tasks, $\OML/cmm/m/it/10 t[] \OT1/cmr/m
++/n/10 = \OML/cmm/m/it/10 t[]$\OT1/ptm/m/n/10 (+20) , so \OT1/cmtt/m/n/10 adapti
++ve[]tanh[]stage \OT1/ptm/m/n/10 (+20) is \OT1/ptm/m/it/10 (+20) iden-ti-cal \OT
++1/ptm/m/n/10 (+20) to
++ []
+ 
+-[8]
+ 
+-Package xcolor Warning: Incompatible color definition on input line 479.
++LaTeX Warning: Reference `tab:predicted' on page 11 undefined on input line 639
++.
+ 
++[11]
+ 
+-Package xcolor Warning: Incompatible color definition on input line 494.
++Package xcolor Warning: Incompatible color definition on input line 713.
+ 
+-<fig_train_success_main.pdf, id=449, 578.16pt x 361.35pt>
++<fig_train_success_main.pdf, id=770, 578.16pt x 361.35pt>
+ File: fig_train_success_main.pdf Graphic file (type pdf)
+ <use fig_train_success_main.pdf>
+-Package pdftex.def Info: fig_train_success_main.pdf  used on input line 498.
++Package pdftex.def Info: fig_train_success_main.pdf  used on input line 717.
+ (pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
+ 
+-Package xcolor Warning: Incompatible color definition on input line 499.
++Package xcolor Warning: Incompatible color definition on input line 719.
+ 
+ 
+-Package xcolor Warning: Incompatible color definition on input line 499.
++Package xcolor Warning: Incompatible color definition on input line 719.
+ 
+-<fig_train_return_main.pdf, id=452, 578.16pt x 361.35pt>
++<fig_train_return_main.pdf, id=773, 578.16pt x 361.35pt>
+ File: fig_train_return_main.pdf Graphic file (type pdf)
+ <use fig_train_return_main.pdf>
+-Package pdftex.def Info: fig_train_return_main.pdf  used on input line 517.
++Package pdftex.def Info: fig_train_return_main.pdf  used on input line 737.
+ (pdftex.def)             Requested size: 190.79109pt x 119.24036pt.
+-<fig_eval_return_main.pdf, id=453, 578.16pt x 361.35pt>
++<fig_eval_return_main.pdf, id=774, 578.16pt x 361.35pt>
+ File: fig_eval_return_main.pdf Graphic file (type pdf)
+ <use fig_eval_return_main.pdf>
+-Package pdftex.def Info: fig_eval_return_main.pdf  used on input line 517.
++Package pdftex.def Info: fig_eval_return_main.pdf  used on input line 737.
+ (pdftex.def)             Requested size: 190.79109pt x 119.24036pt.
+ 
+ LaTeX Warning: `h' float specifier changed to `ht'.
+ 
+-<fig_pushcube_main.pdf, id=454, 578.16pt x 361.35pt>
+-File: fig_pushcube_main.pdf Graphic file (type pdf)
+-<use fig_pushcube_main.pdf>
+-Package pdftex.def Info: fig_pushcube_main.pdf  used on input line 522.
+-(pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
++[12 <./fig_train_success_main.pdf>] [13 <./fig_train_return_main.pdf> <./fig_ev
++al_return_main.pdf>] (./rep.bbl)
+ 
+-LaTeX Warning: `h' float specifier changed to `ht'.
++LaTeX Warning: Reference `tab:tasks' on page 14 undefined on input line 768.
+ 
+-<fig_pushcube_train_return_main.pdf, id=455, 578.16pt x 361.35pt>
+-File: fig_pushcube_train_return_main.pdf Graphic file (type pdf)
+-<use fig_pushcube_train_return_main.pdf>
+-Package pdftex.def Info: fig_pushcube_train_return_main.pdf  used on input line
+- 541.
+-(pdftex.def)             Requested size: 190.79109pt x 119.24036pt.
+-<fig_pushcube_eval_return_main.pdf, id=456, 578.16pt x 361.35pt>
+-File: fig_pushcube_eval_return_main.pdf Graphic file (type pdf)
+-<use fig_pushcube_eval_return_main.pdf>
+-Package pdftex.def Info: fig_pushcube_eval_return_main.pdf  used on input line 
+-541.
+-(pdftex.def)             Requested size: 190.79109pt x 119.24036pt.
+ 
+-LaTeX Warning: `h' float specifier changed to `ht'.
+-
+-<fig_liftpeg_main.pdf, id=457, 578.16pt x 361.35pt>
+-File: fig_liftpeg_main.pdf Graphic file (type pdf)
+-<use fig_liftpeg_main.pdf>
+-Package pdftex.def Info: fig_liftpeg_main.pdf  used on input line 554.
+-(pdftex.def)             Requested size: 397.48499pt x 248.42752pt.
++Package natbib Warning: There were undefined citations.
+ 
+-LaTeX Warning: `h' float specifier changed to `ht'.
++[14
+ 
+-<fig_liftpeg_per_seed.pdf, id=458, 1084.05pt x 289.08pt>
+-File: fig_liftpeg_per_seed.pdf Graphic file (type pdf)
+-<use fig_liftpeg_per_seed.pdf>
+-Package pdftex.def Info: fig_liftpeg_per_seed.pdf  used on input line 564.
+-(pdftex.def)             Requested size: 397.48499pt x 105.99632pt.
+-
+-LaTeX Warning: `h' float specifier changed to `ht'.
+-
+-
+-LaTeX Warning: `h' float specifier changed to `ht'.
+-
+-[9 <./fig_train_success_main.pdf>]
+-Underfull \vbox (badness 10000) has occurred while \output is active []
++] (./rep.aux)
+ 
+- [10 <./fig_train_return_main.pdf> <./fig_eval_return_main.pdf> <./fig_pushcube
+-_main.pdf>] [11 <./fig_pushcube_train_return_main.pdf> <./fig_pushcube_eval_ret
+-urn_main.pdf> <./fig_liftpeg_main.pdf>] [12 <./fig_liftpeg_per_seed.pdf>] (./re
+-p.bbl)
+-[13
++LaTeX Warning: There were undefined references.
+ 
+-] (./rep.aux)
+ 
+ LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+ 
+@@ -800,42 +872,45 @@ Package rerunfilecheck Warning: File `rep.out' has changed.
+ (rerunfilecheck)                or use package `bookmark'.
+ 
+ Package rerunfilecheck Info: Checksums for `rep.out':
+-(rerunfilecheck)             Before: B4665FCE0F68A56C1FB69FB4A694C08D;3747
+-(rerunfilecheck)             After:  0F582E2DEB430CD3BF66BDD773112EF6;3986.
++(rerunfilecheck)             Before: 0F582E2DEB430CD3BF66BDD773112EF6;3986
++(rerunfilecheck)             After:  B9F6423F5F9C829E344B2EC616C7D2DD;4352.
+  ) 
+ Here is how much of TeX's memory you used:
+- 13832 strings out of 480247
+- 214557 string characters out of 5896151
+- 552688 words of memory out of 5000000
+- 31225 multiletter control sequences out of 15000+600000
+- 502039 words of font info for 232 fonts, out of 8000000 for 9000
++ 13880 strings out of 480247
++ 215112 string characters out of 5896151
++ 555768 words of memory out of 5000000
++ 31237 multiletter control sequences out of 15000+600000
++ 504262 words of font info for 248 fonts, out of 8000000 for 9000
+  14 hyphenation exceptions out of 8191
+- 75i,11n,77p,1000b,432s stack positions out of 5000i,500n,10000p,200000b,80000s
+-{/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc}</usr/share/texliv
+-e/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texlive/texm
+-f-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/share/texlive/texmf-dist/
+-fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/
+-type1/public/amsfonts/cm/cmmi6.pfb></usr/share/texlive/texmf-dist/fonts/type1/p
+-ublic/amsfonts/cm/cmmi7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/a
+-msfonts/cm/cmmi9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts
+-/cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr
+-5.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></
+-usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/shar
+-e/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texliv
+-e/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texm
+-f-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/share/texlive/texmf-dist/
+-fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texlive/texmf-dist/fonts/t
+-ype1/public/amsfonts/cm/cmsy9.pfb></usr/share/texlive/texmf-dist/fonts/type1/pu
+-blic/amsfonts/cm/cmtt10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/a
+-msfonts/cm/cmtt9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts
+-/symbols/msbm10.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/helvetic/uhv
+-r8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/s
+-hare/texlive/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/te
+-xmf-dist/fonts/type1/urw/times/utmri8a.pfb>
+-Output written on rep.pdf (13 pages, 535742 bytes).
++ 75i,11n,77p,1000b,438s stack positions out of 5000i,500n,10000p,200000b,80000s
++pdfTeX warning (dest): name{subsection.7.1} has been referenced but does not 
++exist, replaced by a fixed one
++
++{/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc}</usr/share/texlive/
++texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texlive/texmf-
++dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/share/texlive/texmf-dist/fo
++nts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/ty
++pe1/public/amsfonts/cm/cmmi6.pfb></usr/share/texlive/texmf-dist/fonts/type1/pub
++lic/amsfonts/cm/cmmi7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/ams
++fonts/cm/cmmi9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/c
++m/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.
++pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></us
++r/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/
++texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texlive/
++texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-
++dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/share/texlive/texmf-dist/fo
++nts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texlive/texmf-dist/fonts/typ
++e1/public/amsfonts/cm/cmsy9.pfb></usr/share/texlive/texmf-dist/fonts/type1/publ
++ic/amsfonts/cm/cmtt10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/ams
++fonts/cm/cmtt9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/s
++ymbols/msbm10.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/helvetic/uhvr8
++a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/sha
++re/texlive/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texm
++f-dist/fonts/type1/urw/times/utmri8a.pfb>
++Output written on rep.pdf (14 pages, 545451 bytes).
+ PDF statistics:
+- 1078 PDF objects out of 1200 (max. 8388607)
+- 419 compressed objects within 5 object streams
+- 83 named destinations out of 1000 (max. 500000)
+- 51418 words of extra memory for PDF output out of 51595 (max. 10000000)
++ 1095 PDF objects out of 1200 (max. 8388607)
++ 435 compressed objects within 5 object streams
++ 94 named destinations out of 1000 (max. 500000)
++ 53474 words of extra memory for PDF output out of 61914 (max. 10000000)
+ 
+diff --git a/paper/rep.out b/paper/rep.out
+index c20e4c4..da72336 100644
+--- a/paper/rep.out
++++ b/paper/rep.out
+@@ -6,13 +6,18 @@
+ \BOOKMARK [2][-]{subsection.3.3}{\376\377\000D\000i\000m\000e\000n\000s\000i\000o\000n\000\040\0003\000:\000\040\000T\000e\000r\000m\000i\000n\000a\000l\000\040\000B\000o\000n\000u\000s}{section.3}% 6
+ \BOOKMARK [2][-]{subsection.3.4}{\376\377\000D\000i\000m\000e\000n\000s\000i\000o\000n\000\040\0004\000:\000\040\000N\000o\000r\000m\000a\000l\000i\000z\000a\000t\000i\000o\000n}{section.3}% 7
+ \BOOKMARK [1][-]{section.4}{\376\377\000E\000x\000p\000e\000r\000i\000m\000e\000n\000t\000a\000l\000\040\000S\000e\000t\000u\000p}{}% 8
+-\BOOKMARK [1][-]{section.5}{\376\377\000R\000e\000s\000u\000l\000t\000s\000:\000\040\000R\000e\000a\000c\000h\000\040\000S\000h\000a\000p\000e\000\040\000A\000b\000l\000a\000t\000i\000o\000n\000\040\000o\000n\000\040\000P\000i\000c\000k\000C\000u\000b\000e\000-\000v\0001}{}% 9
+-\BOOKMARK [2][-]{subsection.5.1}{\376\377\000F\000i\000n\000d\000i\000n\000g\000s}{section.5}% 10
+-\BOOKMARK [1][-]{section.6}{\376\377\000P\000l\000a\000n\000n\000e\000d\000\040\000E\000x\000p\000e\000r\000i\000m\000e\000n\000t\000s}{}% 11
+-\BOOKMARK [2][-]{subsection.6.1}{\376\377\000P\000h\000a\000s\000e\000\040\0001\000:\000\040\000F\000u\000l\000l\000\040\000r\000e\000a\000c\000h\000\040\000s\000h\000a\000p\000e\000\040\000s\000w\000e\000e\000p\000\040\000w\000i\000t\000h\000\040\000m\000u\000l\000t\000i\000-\000s\000e\000e\000d\000\040\000v\000a\000l\000i\000d\000a\000t\000i\000o\000n}{section.6}% 12
+-\BOOKMARK [2][-]{subsection.6.2}{\376\377\000P\000h\000a\000s\000e\000\040\0002\000:\000\040\000G\000a\000t\000i\000n\000g\000\040\000a\000n\000d\000\040\000t\000e\000r\000m\000i\000n\000a\000l\000\040\000d\000i\000m\000e\000n\000s\000i\000o\000n\000s}{section.6}% 13
+-\BOOKMARK [2][-]{subsection.6.3}{\376\377\000P\000h\000a\000s\000e\000\040\0003\000:\000\040\000C\000r\000o\000s\000s\000-\000t\000a\000s\000k\000\040\000t\000r\000a\000n\000s\000f\000e\000r}{section.6}% 14
+-\BOOKMARK [2][-]{subsection.6.4}{\376\377\000P\000h\000a\000s\000e\000\040\0004\000:\000\040\000A\000l\000g\000o\000r\000i\000t\000h\000m\000\040\000g\000e\000n\000e\000r\000a\000l\000i\000z\000a\000t\000i\000o\000n}{section.6}% 15
+-\BOOKMARK [2][-]{subsection.6.5}{\376\377\000P\000h\000a\000s\000e\000\040\0005\000:\000\040\000P\000l\000a\000y\000b\000o\000o\000k\000\040\000a\000n\000d\000\040\000s\000i\000m\000-\000t\000o\000-\000r\000e\000a\000l\000\040\000\050\000s\000t\000r\000e\000t\000c\000h\000\051}{section.6}% 16
+-\BOOKMARK [1][-]{section.7}{\376\377\000D\000i\000s\000c\000u\000s\000s\000i\000o\000n\000\040\000a\000n\000d\000\040\000O\000p\000e\000n\000\040\000Q\000u\000e\000s\000t\000i\000o\000n\000s}{}% 17
+-\BOOKMARK [1][-]{section.8}{\376\377\000C\000o\000n\000c\000l\000u\000s\000i\000o\000n}{}% 18
++\BOOKMARK [1][-]{section.5}{\376\377\000R\000e\000s\000u\000l\000t\000s}{}% 9
++\BOOKMARK [2][-]{subsection.5.1}{\376\377\000P\000i\000c\000k\000C\000u\000b\000e\000-\000v\0001\000:\000\040\000R\000e\000a\000c\000h\000\040\000S\000h\000a\000p\000e\000\040\000A\000b\000l\000a\000t\000i\000o\000n}{section.5}% 10
++\BOOKMARK [2][-]{subsection.5.2}{\376\377\000C\000r\000o\000s\000s\000-\000T\000a\000s\000k\000\040\000V\000a\000l\000i\000d\000a\000t\000i\000o\000n\000:\000\040\000P\000u\000s\000h\000C\000u\000b\000e\000-\000v\0001}{section.5}% 11
++\BOOKMARK [2][-]{subsection.5.3}{\376\377\000C\000r\000o\000s\000s\000-\000T\000a\000s\000k\000\040\000V\000a\000l\000i\000d\000a\000t\000i\000o\000n\000:\000\040\000L\000i\000f\000t\000P\000e\000g\000U\000p\000r\000i\000g\000h\000t\000-\000v\0001}{section.5}% 12
++\BOOKMARK [2][-]{subsection.5.4}{\376\377\000C\000r\000o\000s\000s\000-\000T\000a\000s\000k\000\040\000V\000a\000l\000i\000d\000a\000t\000i\000o\000n\000:\000\040\000S\000t\000a\000c\000k\000C\000u\000b\000e\000-\000v\0001}{section.5}% 13
++\BOOKMARK [2][-]{subsection.5.5}{\376\377\000S\000u\000m\000m\000a\000r\000y\000:\000\040\000T\000a\000s\000k\000-\000S\000t\000r\000u\000c\000t\000u\000r\000e\000-\000D\000e\000p\000e\000n\000d\000e\000n\000t\000\040\000P\000l\000a\000y\000b\000o\000o\000k}{section.5}% 14
++\BOOKMARK [1][-]{section.6}{\376\377\000P\000l\000a\000n\000n\000e\000d\000\040\000E\000x\000p\000e\000r\000i\000m\000e\000n\000t\000s}{}% 15
++\BOOKMARK [2][-]{subsection.6.1}{\376\377\000S\000t\000a\000g\000e\000-\000C\000o\000n\000d\000i\000t\000i\000o\000n\000e\000d\000\040\000A\000n\000n\000e\000a\000l\000i\000n\000g\000\040\000\050\000a\000d\000a\000p\000t\000i\000v\000e\000\137\000t\000a\000n\000h\000\137\000s\000t\000a\000g\000e\000\051}{section.6}% 16
++\BOOKMARK [2][-]{subsection.6.2}{\376\377\000P\000l\000a\000c\000e\000S\000p\000h\000e\000r\000e\000-\000v\0001\000\040\000\050\000T\000h\000r\000e\000e\000-\000S\000t\000a\000g\000e\000\051}{section.6}% 17
++\BOOKMARK [2][-]{subsection.6.3}{\376\377\000G\000a\000t\000i\000n\000g\000\040\000a\000n\000d\000\040\000T\000e\000r\000m\000i\000n\000a\000l\000\040\000D\000i\000m\000e\000n\000s\000i\000o\000n\000s}{section.6}% 18
++\BOOKMARK [2][-]{subsection.6.4}{\376\377\000A\000l\000g\000o\000r\000i\000t\000h\000m\000\040\000G\000e\000n\000e\000r\000a\000l\000i\000z\000a\000t\000i\000o\000n}{section.6}% 19
++\BOOKMARK [2][-]{subsection.6.5}{\376\377\000P\000l\000a\000y\000b\000o\000o\000k\000\040\000a\000n\000d\000\040\000S\000i\000m\000-\000t\000o\000-\000R\000e\000a\000l\000\040\000\050\000S\000t\000r\000e\000t\000c\000h\000\051}{section.6}% 20
++\BOOKMARK [1][-]{section.7}{\376\377\000D\000i\000s\000c\000u\000s\000s\000i\000o\000n}{}% 21
++\BOOKMARK [1][-]{section.8}{\376\377\000C\000o\000n\000c\000l\000u\000s\000i\000o\000n}{}% 22
++\BOOKMARK [1][-]{appendix.A}{\376\377\000S\000u\000p\000p\000o\000r\000t\000e\000d\000\040\000T\000a\000s\000k\000s\000\040\000a\000n\000d\000\040\000S\000t\000a\000g\000e\000\040\000S\000t\000r\000u\000c\000t\000u\000r\000e}{}% 23
+diff --git a/paper/rep.pdf b/paper/rep.pdf
+index e4b895a..4228cd2 100644
+Binary files a/paper/rep.pdf and b/paper/rep.pdf differ
