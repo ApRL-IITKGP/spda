@@ -7,9 +7,8 @@ import torch
 from mani_skill.agents.robots import Fetch, Panda
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.tasks.tabletop.reward_variants import (
-    REACHING_VARIANTS,
-    ADAPTIVE_REACHING_VARIANTS,
     VALID_REACHING_VARIANTS,
+    build_reach_fn,
     apply_gate,
     apply_terminal,
 )
@@ -62,15 +61,15 @@ class PullCubeToolEnv(BaseEnv):
         reach_variant="tanh",
         gate_variant="hard",
         terminal_variant="hard_jump",
+        reach_k_min: float = 2.0,
+        reach_k_max: float = 20.0,
+        reach_alpha: float = 10.0,
         **kwargs,
     ):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         if reach_variant not in VALID_REACHING_VARIANTS:
             raise ValueError(f"Unknown reach_variant {reach_variant!r}. Valid: {VALID_REACHING_VARIANTS}")
-        if reach_variant in ADAPTIVE_REACHING_VARIANTS:
-            self.reach_fn = ADAPTIVE_REACHING_VARIANTS[reach_variant]()
-        else:
-            self.reach_fn = REACHING_VARIANTS[reach_variant]
+        self.reach_fn = build_reach_fn(reach_variant, k_min=reach_k_min, k_max=reach_k_max, alpha=reach_alpha)
         self.reach_variant = reach_variant
         self.gate_variant = gate_variant
         self.terminal_variant = terminal_variant

@@ -94,6 +94,12 @@ class Args:
     """gating mechanism: hard|soft|additive|curriculum"""
     terminal_variant: str = "hard_jump"
     """terminal bonus: hard_jump|smooth|none"""
+    reach_k_min: float = 2.0
+    """distance-adaptive reward: k value far from goal (controls outer support radius ~1/k_min)"""
+    reach_k_max: float = 20.0
+    """distance-adaptive reward: k value at goal (controls inner basin tightness ~1/k_max)"""
+    reach_alpha: float = 10.0
+    """distance-adaptive reward: transition rate; moat location ~1.65/alpha"""
 
     # Algorithm specific arguments
     total_timesteps: int = 10000000
@@ -320,9 +326,13 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     if args.exp_name is None:
         args.exp_name = os.path.basename(__file__)[: -len(".py")]
+        _dist_suffix = ""
+        if args.reach_variant in ("adaptive_concave_distance", "adaptive_tanh_distance"):
+            if (args.reach_k_min, args.reach_k_max, args.reach_alpha) != (2.0, 20.0, 10.0):
+                _dist_suffix = f"__kmin{args.reach_k_min}_kmax{args.reach_k_max}_a{args.reach_alpha}"
         run_name = (
             f"{args.env_id}"
-            f"__reach-{args.reach_variant}"
+            f"__reach-{args.reach_variant}{_dist_suffix}"
             f"__gate-{args.gate_variant}"
             f"__term-{args.terminal_variant}"
             f"__{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -346,6 +356,9 @@ if __name__ == "__main__":
     env_kwargs["reach_variant"] = args.reach_variant
     env_kwargs["gate_variant"] = args.gate_variant
     env_kwargs["terminal_variant"] = args.terminal_variant
+    env_kwargs["reach_k_min"] = args.reach_k_min
+    env_kwargs["reach_k_max"] = args.reach_k_max
+    env_kwargs["reach_alpha"] = args.reach_alpha
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
     eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, human_render_camera_configs=dict(shader_pack="default"), **env_kwargs)
     if isinstance(envs.action_space, gym.spaces.Dict):

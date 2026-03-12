@@ -29,6 +29,7 @@ from .reaching import (
     AdaptiveConcaveStageReward,
     AdaptiveDistanceReward,
     AdaptiveEMAReward,
+    build_reach_fn,
 )
 from .gating import apply_gate, VALID_GATE_VARIANTS
 from .terminal import apply_terminal, VALID_TERMINAL_VARIANTS
@@ -41,6 +42,7 @@ __all__ = [
     "AdaptiveConcaveStageReward",
     "AdaptiveDistanceReward",
     "AdaptiveEMAReward",
+    "build_reach_fn",
     "apply_gate",
     "VALID_GATE_VARIANTS",
     "apply_terminal",

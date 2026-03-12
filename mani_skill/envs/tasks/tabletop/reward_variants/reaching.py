@@ -491,3 +491,18 @@ ADAPTIVE_REACHING_VARIANTS = {
 VALID_REACHING_VARIANTS = (
     list(REACHING_VARIANTS.keys()) + list(ADAPTIVE_REACHING_VARIANTS.keys())
 )
+
+
+def build_reach_fn(variant: str, k_min: float = 2.0, k_max: float = 20.0, alpha: float = 10.0):
+    """Construct a reaching reward function by name.
+
+    For distance-adaptive variants (adaptive_concave_distance, adaptive_tanh_distance),
+    k_min, k_max, and alpha override the defaults, allowing per-run parameterisation
+    from CLI arguments.  All other variants ignore these kwargs.
+    """
+    if variant in ("adaptive_concave_distance", "adaptive_tanh_distance"):
+        mode = "concave" if "concave" in variant else "tanh"
+        return AdaptiveDistanceReward(k_min=k_min, k_max=k_max, alpha=alpha, mode=mode)
+    if variant in ADAPTIVE_REACHING_VARIANTS:
+        return ADAPTIVE_REACHING_VARIANTS[variant]()
+    return REACHING_VARIANTS[variant]
