@@ -69,6 +69,7 @@ class PlaceSphereEnv(BaseEnv):
         reach_variant="tanh",
         gate_variant="hard",
         terminal_variant="hard_jump",
+        reach_k: float = 5.0,
         reach_k_min: float = 2.0,
         reach_k_max: float = 20.0,
         reach_alpha: float = 10.0,
@@ -77,7 +78,7 @@ class PlaceSphereEnv(BaseEnv):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         if reach_variant not in VALID_REACHING_VARIANTS:
             raise ValueError(f"Unknown reach_variant {reach_variant!r}. Valid: {VALID_REACHING_VARIANTS}")
-        self.reach_fn = build_reach_fn(reach_variant, k_min=reach_k_min, k_max=reach_k_max, alpha=reach_alpha)
+        self.reach_fn = build_reach_fn(reach_variant, k=reach_k, k_min=reach_k_min, k_max=reach_k_max, alpha=reach_alpha)
         self.reach_variant = reach_variant
         self.gate_variant = gate_variant
         self.terminal_variant = terminal_variant

@@ -94,6 +94,8 @@ class Args:
     """gating mechanism: hard|soft|additive|curriculum"""
     terminal_variant: str = "hard_jump"
     """terminal bonus: hard_jump|smooth|none"""
+    reach_k: float = 5.0
+    """static tanh / concave_truncated scale: tanh(k*d) or max(0,1-(k*d)^2), R=1/k (default 5 → R=0.2m)"""
     reach_k_min: float = 2.0
     """distance-adaptive reward: k value far from goal (controls outer support radius ~1/k_min)"""
     reach_k_max: float = 20.0
@@ -330,6 +332,8 @@ if __name__ == "__main__":
         if args.reach_variant in ("adaptive_concave_distance", "adaptive_tanh_distance"):
             if (args.reach_k_min, args.reach_k_max, args.reach_alpha) != (2.0, 20.0, 10.0):
                 _dist_suffix = f"__kmin{args.reach_k_min}_kmax{args.reach_k_max}_a{args.reach_alpha}"
+        elif args.reach_variant in ("tanh", "concave_truncated") and args.reach_k != 5.0:
+            _dist_suffix = f"__k{args.reach_k}"
         run_name = (
             f"{args.env_id}"
             f"__reach-{args.reach_variant}{_dist_suffix}"
@@ -356,6 +360,7 @@ if __name__ == "__main__":
     env_kwargs["reach_variant"] = args.reach_variant
     env_kwargs["gate_variant"] = args.gate_variant
     env_kwargs["terminal_variant"] = args.terminal_variant
+    env_kwargs["reach_k"] = args.reach_k
     env_kwargs["reach_k_min"] = args.reach_k_min
     env_kwargs["reach_k_max"] = args.reach_k_max
     env_kwargs["reach_alpha"] = args.reach_alpha

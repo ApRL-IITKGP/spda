@@ -340,6 +340,7 @@ class AdaptiveEMAReward:
 
 REACHING_VARIANTS = {
     # Baseline: smooth sigmoid, monotone decreasing, bounded [0,1]
+    # k is parameterised at build time via build_reach_fn(k=...)
     "tanh": lambda d: 1.0 - torch.tanh(5.0 * d),
 
     # Linear with truncation: piecewise-linear, convex, bounded [0,1]
@@ -493,13 +494,26 @@ VALID_REACHING_VARIANTS = (
 )
 
 
-def build_reach_fn(variant: str, k_min: float = 2.0, k_max: float = 20.0, alpha: float = 10.0):
+def build_reach_fn(
+    variant: str,
+    k: float = 5.0,
+    k_min: float = 2.0,
+    k_max: float = 20.0,
+    alpha: float = 10.0,
+):
     """Construct a reaching reward function by name.
 
-    For distance-adaptive variants (adaptive_concave_distance, adaptive_tanh_distance),
-    k_min, k_max, and alpha override the defaults, allowing per-run parameterisation
-    from CLI arguments.  All other variants ignore these kwargs.
+    ``k`` parameterises the scale of static variants that support it:
+      - ``tanh``              → ``1 - tanh(k * d)``          (default k=5)
+      - ``concave_truncated`` → ``max(0, 1 - (k*d)^2)``      (default k=5, R=1/k=0.2m)
+
+    ``k_min``, ``k_max``, ``alpha`` parameterise the distance-adaptive variants.
+    All other variants ignore these kwargs.
     """
+    if variant == "tanh":
+        return lambda d: 1.0 - torch.tanh(k * d)
+    if variant == "concave_truncated":
+        return lambda d: torch.clamp(1.0 - (k * d) ** 2, 0.0, 1.0)
     if variant in ("adaptive_concave_distance", "adaptive_tanh_distance"):
         mode = "concave" if "concave" in variant else "tanh"
         return AdaptiveDistanceReward(k_min=k_min, k_max=k_max, alpha=alpha, mode=mode)
