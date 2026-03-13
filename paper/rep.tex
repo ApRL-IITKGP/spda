@@ -422,18 +422,24 @@ reward is a smooth, strictly decreasing function; with $\Delta k \geq 15$ a moat
 appears. Our configuration ($k_{\max}=20$, $\Delta k = 18$) sits just above the threshold,
 producing a very shallow moat. With $k_{\max}=20$, $R_{\mathrm{inner}} \approx 0.05$m.
 
-\paragraph{$\alpha$: transition rate and moat location.}
+\paragraph{$\alpha$: commitment distance.}
 $\alpha$ controls how quickly $k(d)$ transitions from $k_{\max}$ (near goal) to
-$k_{\min}$ (far away). The moat, when it exists, appears at $d \approx 1.65/\alpha$
-(between $1/\alpha$ and $2/\alpha$). Crucially, $\alpha$ also determines whether the moat
-is visible in the reward or hidden under the $r=0$ clamp: the moat is visible only
-if $\varphi$ at the local maximum is less than 1. For the current $k_{\min}$, $k_{\max}$,
-this visibility requires $\alpha$ to be large enough that the moat location is close
-to the goal (small $d$), where $\varphi < 1$. With $\alpha=10$, the moat is at
-$d\approx 0.165$m, well within the support radius (0.46m), and thus visible.
-Lowering $\alpha$ to~5 would push the moat toward $d\approx 0.35$m, where
+$k_{\min}$ (far away), and in doing so sets the distance at which the policy transitions
+from the \emph{exploration regime} (wide support, shallow gradient) to the
+\emph{precision regime} (tight basin, steep gradient). Intuitively, $\alpha$ answers
+the question: \emph{at what distance from the goal does the policy begin committing to
+precision rather than gross approach?} Small $\alpha$ means the transition is gradual
+and spread over a large distance --- the reward tightens slowly throughout the entire
+approach. Large $\alpha$ means the transition is sharp and localised: the policy
+experiences wide exploratory reward for most of the approach, then hits an abrupt
+shift into the precision basin close to the goal.
+The moat, when it exists, appears at $d \approx 1.65/\alpha$
+(between $1/\alpha$ and $2/\alpha$), which is exactly the commitment boundary ---
+the geometric point past which the policy is in the inner basin and should commit.
+With $\alpha=10$, the commitment distance is $d\approx 0.165$m, well within the support radius (0.46m), and thus visible.
+Lowering $\alpha$ to~5 would push the commitment boundary toward $d\approx 0.35$m, where
 $\varphi > 1$ and the reward is already zero --- the moat becomes invisible.
-Raising $\alpha$ to~15 moves the moat to $d\approx 0.11$m and deepens it to $r\approx 0.69$,
+Raising $\alpha$ to~15 moves the commitment boundary to $d\approx 0.11$m and deepens it to $r\approx 0.69$,
 making it a more substantial feature of the landscape.
 
 We have not yet varied these parameters experimentally; the configuration
@@ -964,6 +970,25 @@ Stage boundaries are identified as points where $d(t)$ jumps as the next subgoal
 activates. This would make the entire dense reward function inferrable from a small
 number of demonstrations with no reward engineering --- connecting the REP unit
 framework to imitation learning and inverse reward design.
+
+\textbf{REP units on learned task-progress signals.}
+Throughout this work $d$ denotes Euclidean end-effector distance, which is a good
+proxy for inverse task progress on reaching tasks (where $d \to 0$ corresponds to
+task completion) but a poor one for tasks with strong orientation or contact
+requirements, such as peg insertion. A natural generalisation is to treat $d$ as
+\emph{any} scalar measure of inverse task progress --- with $d=0$ meaning the
+subtask is complete and $d \to \infty$ meaning it has barely begun. Under this
+interpretation, the REPCon geometry is immediately applicable to learned progress
+signals such as those produced by Robometer or TOPReward, which output a
+dense per-frame progress scalar from a small demonstration set. Substituting a
+learned progress signal into the REPCon formula would allow the geometric guarantees
+(outer exploration support, inner precision basin, no hover attractor) to be
+transferred to tasks where Euclidean distance fundamentally fails as a progress
+proxy, such as \texttt{PegInsertionSide-v1}. The parameter triple
+$(k_{\min}, k_{\max}, \alpha)$ retains its interpretation: $1/k_{\min}$ is the
+maximum starting progress distance, $1/k_{\max}$ is the success tolerance in
+progress units, and $1.65/\alpha$ is the commitment threshold --- the progress level
+past which the reward switches from exploratory to precise.
 
 \textbf{Train/eval success gap as a reward quality diagnostic.}
 Explained variance is uniformly $\approx 0.96$ across all variants---uninformative as
