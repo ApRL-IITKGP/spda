@@ -335,8 +335,26 @@ far from goal). The full reward is
     \quad k(d) = k_{\min} + (k_{\max} - k_{\min})\,e^{-\alpha d}.}
     \label{eq:acd}
 \end{equation}
-We use $k_{\min}=2$, $k_{\max}=18$, $\alpha=10$ in all experiments reported here;
+We use $k_{\min}=2$, $k_{\max}=20$, $\alpha=10$ in all experiments reported here;
 these are the first configuration we tried and further tuning may yield better results.
+
+\paragraph{REPCon and REPTan units.}
+We give a name to this primitive. A \textbf{REPCon unit} is an instance of
+Eq.~\eqref{eq:acd} --- a concave distance-adaptive reward characterised by the
+triple $(k_{\min}, k_{\max}, \alpha)$. The triple encodes the geometric requirements
+of a single subtask: $k_{\min}$ sets the outer support radius (how far the agent may
+start), $k_{\max}$ sets the inner basin tightness (the precision required at success),
+and $\alpha$ controls the transition length scale between the two regimes.
+Replacing the concave base $\max(0,1-(k(d)d)^2)$ with a tanh base
+$1-\tanh(k(d)\cdot d)$ gives the analogous \textbf{REPTan unit}, which has
+infinite support (no hard cutoff) but otherwise the same $k(d)$ structure.
+
+A hierarchical task with $n$ stages can in principle be equipped with $n$ REPCon (or
+REPTan) units, each tuned to the geometry of its subtask. The current
+\texttt{adaptive\_concave\_distance} variant is the degenerate case where all stages
+share a single REPCon unit --- which already achieves strong results, suggesting a
+well-chosen unit generalises across subtasks. Per-stage parameter tuning is a natural
+extension (Section~\ref{sec:planned}).
 
 \subsection{Geometry of the Reward: The Scaled Distance $\varphi(d) = k(d)\cdot d$}
 
@@ -375,11 +393,11 @@ Setting this to zero gives the moat-existence condition:
     \frac{k_{\max}}{k_{\min}} > 1 + e^{2} \approx 8.4.
     \label{eq:moat}
 \end{equation}
-With $k_{\min}=2$, $k_{\max}=18$: $k_{\max}/k_{\min} = 9 > 8.4$, so a moat
+With $k_{\min}=2$, $k_{\max}=20$: $k_{\max}/k_{\min} = 10 > 8.4$, so a moat
 \emph{does} exist. Numerically, $\varphi$ has a local max at $d\approx 0.165$m
 ($\varphi \approx 0.837$) and a local min at $d\approx 0.245$m ($\varphi \approx 0.828$),
 giving $r \approx 0.299$ at the moat and $r \approx 0.314$ at the outer bump. The moat
-is very shallow (depth $\approx 0.015$) because $k_{\max}/k_{\min} = 9$ is only just above
+is very shallow (depth $\approx 0.015$) because $k_{\max}/k_{\min} = 10$ is only just above
 the threshold $8.4$.
 
 \subsection{Parameter Roles}
@@ -401,8 +419,8 @@ $\Delta k = k_{\max} - k_{\min}$, the moat vanishes when $\Delta k \leq k_{\min}
 equivalently $k_{\max} \leq k_{\min}(1+e^2)$. For $k_{\min}=2$ this threshold is
 $\Delta k \approx 14.8$ (i.e.\ $k_{\max} \approx 16.8$): with $\Delta k \leq 14$ the
 reward is a smooth, strictly decreasing function; with $\Delta k \geq 15$ a moat
-appears. Our configuration ($k_{\max}=18$, $\Delta k = 16$) sits just above the threshold,
-producing a very shallow moat. With $k_{\max}=18$, $R_{\mathrm{inner}} \approx 0.056$m.
+appears. Our configuration ($k_{\max}=20$, $\Delta k = 18$) sits just above the threshold,
+producing a very shallow moat. With $k_{\max}=20$, $R_{\mathrm{inner}} \approx 0.05$m.
 
 \paragraph{$\alpha$: transition rate and moat location.}
 $\alpha$ controls how quickly $k(d)$ transitions from $k_{\max}$ (near goal) to
@@ -419,7 +437,7 @@ Raising $\alpha$ to~15 moves the moat to $d\approx 0.11$m and deepens it to $r\a
 making it a more substantial feature of the landscape.
 
 We have not yet varied these parameters experimentally; the configuration
-$k_{\min}=2$, $k_{\max}=18$, $\alpha=10$ is the first one we tested.
+$k_{\min}=2$, $k_{\max}=20$, $\alpha=10$ is the first one we tested.
 
 \subsection{Why Distance-Adaptivity Resolves the Hierarchical Failure}
 
@@ -787,7 +805,7 @@ learn: seed~42 peaks at 0.938 at $\sim$20M steps before partially decaying.
 The mechanism follows directly from Section~\ref{sec:theory}. Far from the goal
 ($d \approx 0.3$--$0.5$m), $k(d) \approx k_{\min} = 2$ and the outer support radius
 $R \approx 0.5$m provides gradient signal even from hard initialisations. Close to the
-goal ($d < 0.06$m), $k(d) \approx k_{\max} = 18$ tightens the basin, suppressing the
+goal ($d < 0.05$m), $k(d) \approx k_{\max} = 20$ tightens the basin, suppressing the
 soft hover attractor. Neither regime is hardcoded to a time or stage: when a stage
 transition occurs and $d$ jumps to a large value, the reward automatically widens back
 to the exploration regime --- without any clock reset.
@@ -855,7 +873,7 @@ If confirmed, it becomes a \emph{universal} base reward: no task-type selection 
 
 \subsection{Parameter Sensitivity ($k_{\min}$, $k_{\max}$, $\alpha$)}
 
-The current configuration ($k_{\min}=2$, $k_{\max}=18$, $\alpha=10$) is the first
+The current configuration ($k_{\min}=2$, $k_{\max}=20$, $\alpha=10$) is the first
 we tested. Section~\ref{sec:theory} derives the moat-existence condition
 $k_{\max}/k_{\min} > 1+e^2 \approx 8.4$ and characterises the role of each parameter.
 Key ablations:
@@ -924,6 +942,28 @@ criterion but whether the moat is beneficial, neutral, or harmful in practice is
 open empirical question. Finally, our experiments use PPO exclusively; off-policy
 methods may interact differently with reward geometry because they do not replay the
 same near-goal trajectories within a single update batch.
+
+\textbf{REP units as a reward design language for long-horizon tasks.}
+The REPCon and REPTan units introduced in Section~\ref{sec:theory} suggest a broader
+design language: a long-horizon task with $n$ stages can be equipped with $n$ REP
+units, one per stage, each with its own $(k_{\min}, k_{\max}, \alpha)$ triple encoding
+that stage's geometric requirements. $k_{\min} \approx 1/d_{\max}$ sets the outer
+support to match the maximum starting distance for that stage; $k_{\max} \approx
+1/\epsilon$ encodes the required precision at success; and $\alpha$ controls how
+sharply the reward transitions between the two regimes. The current work uses a single
+shared REPCon unit across all stages --- the degenerate case --- and already achieves
+strong results, suggesting the geometry generalises well. Per-stage tuning is a natural
+next step, particularly for tasks with heterogeneous subtask geometries (e.g.\
+free-space reaching followed by precision insertion).
+
+A further extension is to \emph{infer} REP unit parameters from video demonstrations
+rather than specifying them manually. A demonstration provides a distance profile
+$d(t)$ for each subtask: the maximum distance reveals $k_{\min}$, the success
+tolerance reveals $k_{\max}$, and the sharpness of the $d(t)$ drop reveals $\alpha$.
+Stage boundaries are identified as points where $d(t)$ jumps as the next subgoal
+activates. This would make the entire dense reward function inferrable from a small
+number of demonstrations with no reward engineering --- connecting the REP unit
+framework to imitation learning and inverse reward design.
 
 \textbf{Train/eval success gap as a reward quality diagnostic.}
 Explained variance is uniformly $\approx 0.96$ across all variants---uninformative as
