@@ -1,4 +1,4 @@
-\begin{thebibliography}{7}
+\begin{thebibliography}{17}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -39,6 +39,56 @@ J.~Gu et~al.
   manipulation.
 \newblock \emph{arXiv preprint}, 2024.
 
+\bibitem[Zhuang et~al.(2024)Zhuang, Liu, Wang, Liu, Hao, and
+  Wang]{zhuang2024drs}
+Z.~Zhuang, Y.~Liu, Y.~Wang, M.~Liu, J.~Hao, and J.~Wang.
+\newblock Drs: Learning reusable dense reward shaping for multi-stage tasks.
+\newblock \emph{arXiv preprint arXiv:2404.16779}, 2024.
+
+\bibitem[Demir et~al.(2024)]{demir2024hprs}
+N.~M. Demir et~al.
+\newblock Hierarchical potential-based reward shaping from task specifications.
+\newblock \emph{Frontiers in Robotics and AI}, 2024.
+
+\bibitem[Yu et~al.(2024)]{selfadaptive2024}
+K.~Yu et~al.
+\newblock Self-adaptive reward shaping for efficient reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:2408.03029}, 2024.
+
+\bibitem[Bacon et~al.(2017)Bacon, Harb, and Precup]{bacon2017option}
+P.-L. Bacon, J.~Harb, and D.~Precup.
+\newblock The option-critic architecture.
+\newblock In \emph{Proceedings of the AAAI Conference on Artificial
+  Intelligence}, volume~31, 2017.
+
+\bibitem[Nachum et~al.(2018)Nachum, Gu, Lee, and Levine]{nachum2018hiro}
+O.~Nachum, S.~Gu, H.~Lee, and S.~Levine.
+\newblock Data-efficient hierarchical reinforcement learning.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2018.
+
+\bibitem[Andrychowicz et~al.(2017)Andrychowicz, Wolski, Ray, Schneider, Fong,
+  Welinder, McGrew, Tobin, Abbeel, and Zaremba]{andrychowicz2017her}
+M.~Andrychowicz, F.~Wolski, A.~Ray, J.~Schneider, R.~Fong, P.~Welinder,
+  B.~McGrew, J.~Tobin, P.~Abbeel, and W.~Zaremba.
+\newblock Hindsight experience replay.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2017.
+
+\bibitem[Narvekar et~al.(2020)Narvekar, Peng, Leonetti, Sinapov, Taylor, and
+  Stone]{narvekar2020curriculum}
+S.~Narvekar, B.~Peng, M.~Leonetti, J.~Sinapov, M.~E. Taylor, and P.~Stone.
+\newblock Curriculum learning for reinforcement learning domains: A framework
+  and survey.
+\newblock \emph{Journal of Machine Learning Research}, 21:\penalty0 1--50,
+  2020.
+
+\bibitem[Hao et~al.(2025)]{hao2025toddler}
+J.~Hao et~al.
+\newblock From sparse to dense: Toddler-inspired reward transition in
+  goal-conditioned reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:2501.17842}, 2025.
+
 \bibitem[Schulman et~al.(2017)Schulman, Wolski, Dhariwal, Radford, and
   Klimov]{schulman2017ppo}
 J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov.
@@ -52,5 +102,23 @@ T.~Haarnoja, A.~Zhou, P.~Abbeel, and S.~Levine.
   learning with a stochastic actor.
 \newblock In \emph{International Conference on Machine Learning (ICML)}, pages
   1861--1870. PMLR, 2018.
+
+\bibitem[Liang et~al.(2026)Liang, Korkmaz, Zhang, Hwang, Anwar, Kaushik, Shah,
+  Huang, Zettlemoyer, Fox, Xiang, Li, Bobu, Gupta, Tu, Biyik, and
+  Zhang]{liang2026robometer}
+A.~Liang, Y.~Korkmaz, J.~Zhang, M.~Hwang, A.~Anwar, S.~Kaushik, A.~Shah, A.~S.
+  Huang, L.~Zettlemoyer, D.~Fox, Y.~Xiang, A.~Li, A.~Bobu, A.~Gupta, S.~Tu,
+  E.~Biyik, and J.~Zhang.
+\newblock Robometer: Scaling general-purpose robotic reward models via
+  trajectory comparisons.
+\newblock \emph{arXiv preprint arXiv:2603.02115}, 2026.
+
+\bibitem[Chen et~al.(2026)Chen, Harrison, Lee, Yang, Ren, Ratliff, Duan, Fox,
+  and Krishna]{chen2026topreward}
+S.~Chen, C.~Harrison, Y.-C. Lee, A.~J. Yang, Z.~Ren, L.~J. Ratliff, J.~Duan,
+  D.~Fox, and R.~Krishna.
+\newblock {TOPReward}: Token probabilities as hidden zero-shot rewards for
+  robotics.
+\newblock \emph{arXiv preprint arXiv:2602.19313}, 2026.
 
 \end{thebibliography}
