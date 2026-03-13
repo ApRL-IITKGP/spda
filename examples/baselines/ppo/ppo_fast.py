@@ -102,6 +102,18 @@ class Args:
     """distance-adaptive reward: k value at goal (controls inner basin tightness ~1/k_max)"""
     reach_alpha: float = 10.0
     """distance-adaptive reward: transition rate; moat location ~1.65/alpha"""
+    orient_k_min: float = 5.0
+    """PegInsertion stage-3 REP unit: k far from alignment (R=1/k_min)"""
+    orient_k_max: float = 100.0
+    """PegInsertion stage-3 REP unit: k at alignment (R=1/k_max ≈ success threshold)"""
+    orient_alpha: float = 20.0
+    """PegInsertion stage-3 REP unit: transition rate"""
+    insert_k_min: float = 8.0
+    """PegInsertion stage-4 REP unit: k far from hole (R=1/k_min ≈ peg half-length)"""
+    insert_k_max: float = 70.0
+    """PegInsertion stage-4 REP unit: k inside hole (R=1/k_max ≈ success threshold)"""
+    insert_alpha: float = 20.0
+    """PegInsertion stage-4 REP unit: transition rate"""
 
     # Algorithm specific arguments
     total_timesteps: int = 10000000
@@ -364,6 +376,13 @@ if __name__ == "__main__":
     env_kwargs["reach_k_min"] = args.reach_k_min
     env_kwargs["reach_k_max"] = args.reach_k_max
     env_kwargs["reach_alpha"] = args.reach_alpha
+    if args.env_id == "PegInsertionSide-v1":
+        env_kwargs["orient_k_min"] = args.orient_k_min
+        env_kwargs["orient_k_max"] = args.orient_k_max
+        env_kwargs["orient_alpha"] = args.orient_alpha
+        env_kwargs["insert_k_min"] = args.insert_k_min
+        env_kwargs["insert_k_max"] = args.insert_k_max
+        env_kwargs["insert_alpha"] = args.insert_alpha
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
     eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, human_render_camera_configs=dict(shader_pack="default"), **env_kwargs)
     if isinstance(envs.action_space, gym.spaces.Dict):
