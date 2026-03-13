@@ -36,14 +36,14 @@ def plot_metric(metric_name, out_name, title, ylabel):
         print(f"No data for {metric_name}")
         return
 
-    sub = sub.sort_values(["variant", "seed", "step_M"])
-    sub["value"] = sub.groupby(["variant", "seed"])["value"].transform(
+    sub = sub.sort_values(["reach_variant", "seed", "step_M"])
+    sub["value"] = sub.groupby(["reach_variant", "seed"])["value"].transform(
         lambda x: x.ewm(alpha=0.3, adjust=False).mean()
     )
 
     # --- FIG MAIN ---
     plt.figure(figsize=(8, 5))
-    sns.lineplot(data=sub, x="step_M", y="value", hue="variant", style="variant",
+    sns.lineplot(data=sub, x="step_M", y="value", hue="reach_variant", style="reach_variant",
                  errorbar=('ci', 95), dashes=False, palette=colors)
     plt.title(f"LiftPegUpright-v1: {title}\n(EMA Smoothed $\\alpha=0.3$, Shaded 95% CI over 3 seeds)")
     plt.xlabel("Environment Steps (Millions)")
@@ -62,11 +62,11 @@ def plot_metric(metric_name, out_name, title, ylabel):
         ax = axes[ix]
         df_s = sub[sub["seed"] == seed]
         if len(df_s) > 0:
-            sns.lineplot(data=df_s, x="step_M", y="value", hue="variant", style="variant",
+            sns.lineplot(data=df_s, x="step_M", y="value", hue="reach_variant", style="reach_variant",
                          ax=ax, legend=True, palette=colors, dashes=False)
             h, l = ax.get_legend_handles_labels()
             for hnd, lbl in zip(h, l):
-                if lbl not in all_labels and lbl != "variant":
+                if lbl not in all_labels and lbl != "reach_variant":
                     all_labels.append(lbl)
                     all_handles.append(hnd)
             if ax.get_legend() is not None:
