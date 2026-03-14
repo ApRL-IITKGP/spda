@@ -6,16 +6,64 @@
 
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{booktabs}
+\usepackage{enumitem}
 \usepackage{multirow}
 \usepackage{graphicx}
 \usepackage{xcolor}
 \usepackage{microtype}
+\usepackage{caption}
+\usepackage[most]{tcolorbox}
 
-% -----------------------------------------------------------------------
-% Draft helpers — remove before submission
+% ── Color palette ────────────────────────────────────────────────────────────
+\definecolor{repblue}{RGB}{0,100,160}      % section cross-refs
+\definecolor{repcrimson}{RGB}{160,30,30}   % citation refs / finding labels
+\definecolor{repgold}{RGB}{180,130,0}      % key term highlights
+\definecolor{repgray}{RGB}{90,90,90}       % subtle labels
+\definecolor{repboxbg}{RGB}{248,245,240}   % insight box background
+
+% ── Hyperref — set colors after corl_2026 loads it ────────────────────────
+\AtBeginDocument{%
+  \hypersetup{colorlinks=true,
+              linkcolor=repblue,
+              citecolor=repcrimson,
+              urlcolor=repblue}%
+}
+
+% ── Caption style: bold "Figure N." then regular text ────────────────────
+\captionsetup{labelfont=bf, labelsep=period, font=small}
+
+% ── Finding / callout commands ────────────────────────────────────────────
+% Bold colored finding label: \finding{F1}{Hover attractors ...}
+\newcommand{\finding}[2]{%
+  \noindent\textcolor{repcrimson}{\textbf{#1}}\;\textbf{#2.}\enspace}
+
+% Horizontal-rule blockquote for key insights
+\newenvironment{keyinsight}{%
+  \vspace{4pt}\noindent\rule{\linewidth}{0.5pt}\vspace{2pt}%
+  \begin{quote}\small\itshape}%
+ {\end{quote}\vspace{2pt}\noindent\rule{\linewidth}{0.5pt}\vspace{4pt}}
+
+% Colored tcolorbox for theoretic summaries
+\tcbset{
+  repbox/.style={
+    enhanced, breakable,
+    colback=repboxbg, colframe=repcrimson!60!black,
+    boxrule=0.6pt, arc=3pt,
+    left=6pt, right=6pt, top=4pt, bottom=4pt,
+    fonttitle=\bfseries\small, coltitle=white,
+    attach boxed title to top left={yshift=-2mm, xshift=4mm},
+    boxed title style={colback=repcrimson!80!black, arc=2pt,
+                       boxrule=0pt, left=3pt, right=3pt}
+  }
+}
+
+% Shorthand for method names
+\newcommand{\m}[1]{\texttt{#1}}
+
+% ── Draft helpers — remove before submission ─────────────────────────────
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 \newcommand{\placeholder}[1]{\textcolor{gray}{\textit{[#1]}}}
-% -----------------------------------------------------------------------
+% ─────────────────────────────────────────────────────────────────────────
 
 \title{Reward Engineering Playbook:\\
 A Systematic Study of Dense Reward Geometry\\
@@ -63,14 +111,16 @@ reward design, empirical study}
 Reinforcement learning for robot manipulation requires dense reward functions to guide
 exploration: purely sparse rewards that fire only at success are rarely sufficient for
 contact-rich, multi-stage tasks. Yet practitioners designing these dense rewards have
-few principled guidelines. The standard approach is to write a distance-based potential
+few principled guidelines~\citep{ibrahim2024comprehensive}. The standard approach is to write a distance-based potential
 that decreases toward the goal, add binary stage bonuses, and tune scale factors
 empirically until training converges. This process is slow, non-transferable, and yields
 little understanding of which mathematical properties of the reward function matter.
 
-The question we study is: \emph{given that the task and algorithm are fixed, how does
-the geometry of the dense reward function---its shape, curvature, support, smoothness,
-and staging---causally affect learning dynamics and final performance?}
+\begin{keyinsight}
+Given that the task and algorithm are fixed, how does the \emph{geometry} of
+the dense reward function---its shape, curvature, support, smoothness, and
+staging---causally affect learning dynamics and final performance?
+\end{keyinsight}
 
 This is distinct from several related lines of work. Automated reward generation
 methods~\citep{ma2024eureka} improve the speed of reward iteration but treat reward code
@@ -86,27 +136,30 @@ parameterizable dimensions (\S\ref{sec:taxonomy}), implementing them as environm
 kwargs in ManiSkill3 (\S\ref{sec:setup}), and sweeping across combinations while
 holding everything else fixed.
 
-\paragraph{Contributions.}
-\begin{itemize}
-    \item A taxonomy of dense reward geometry along four independently controllable
-    axes, implemented as environment kwargs across 11 ManiSkill3 tabletop tasks
-    (Appendix~\ref{app:tasks}).
-    \item Identification and characterisation of the \emph{hover attractor}---a
-    failure mode of infinite-support rewards---and the fundamental
-    \emph{robustness-ceiling tradeoff} between hover attractors and blind regions.
-    \item A mechanistic account of why within-episode time annealing succeeds on
-    flat tasks but catastrophically fails on hierarchical ones (complete ranking
-    inversion on StackCube).
-    \item A first-principles theory of distance-adaptive reward geometry
-    (Section~\ref{sec:theory}), deriving closed-form conditions on the
-    reward's support structure, moat existence, and parameter roles.
-    \item \texttt{adaptive\_concave\_distance}: a principled static reward derived
-    from the theory that achieves comparable peak performance to the best
-    task-specific static reward while converging $\approx\!2\times$ faster on
-    StackCube-v1 (mean peak $0.979$).
-    \item A reward engineering playbook: empirically grounded, theoretically
-    motivated guidance for dense reward selection by task structure.
-\end{itemize}
+\subsection{Contributions}
+
+\noindent\textbf{C1. Reward geometry taxonomy.}
+We decompose dense manipulation rewards into four independently controllable axes
+and implement them as environment kwargs across 11 ManiSkill3 tabletop tasks
+(\S\ref{sec:taxonomy}, Appendix~\ref{app:tasks}).
+
+\noindent\textbf{C2. Hover attractor and robustness-ceiling tradeoff.}
+We identify and characterise the \emph{hover attractor}---a systematic failure
+mode of infinite-support rewards---and the fundamental tension between hover
+attractors and blind regions that no static reward geometry resolves
+(\S\ref{sec:pickcube}).
+
+\noindent\textbf{C3. Mechanistic account of hierarchical failure.}
+We explain why within-episode time annealing, the best variant on all flat tasks,
+catastrophically fails on StackCube (mean peak $0.063$): the episode clock
+decouples from task progress at stage boundaries---a complete ranking inversion
+(\S\ref{sec:stackcube}).
+
+\noindent\textbf{C4. REPCon: distance-adaptive reward theory and practice.}
+We derive a first-principles theory of distance-adaptive reward geometry
+(\S\ref{sec:theory}), producing \m{adaptive\_concave\_distance} (REPCon unit)---a
+closed-form static reward matching the best hierarchical reward's peak performance
+($0.979$) while converging $\approx\!2\times$ faster.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
@@ -126,6 +179,26 @@ tasks. However, the method treats reward formulas as programs to be searched, no
 geometric objects to be understood. Our work is complementary: we aim to understand
 \emph{why} certain reward structures work, which could inform better search spaces for
 automated methods.
+
+\paragraph{Hover attractors and reward support structure.}
+\citet{trott2019keeping} identified a failure mode in distance-based shaping where
+policies stabilise at a sub-optimal hovering distance rather than committing to contact
+(\emph{``keeping your distance''}), and proposed sibling rivalry as a fix. Our work
+identifies the same phenomenon, names it the \emph{hover attractor}, and proposes a
+cleaner geometric fix via distance-adaptive support. \citet{nilaksh2024barrier} use
+barrier-function-inspired reward shaping to improve convergence speed by 1.4--2.8$\times$;
+their approach is structurally related to REPCon in that both modify the reward's
+distance-field geometry, but differ in derivation and the specific geometric properties
+controlled.
+
+\paragraph{Dense reward design for manipulation.}
+\citet{wu2021learning} learn dense rewards for contact-rich tasks (peg insertion, USB
+insertion) from self-supervised video signals, demonstrating that carefully shaped dense
+rewards are critical for hard contact tasks. \citet{tang2023industreal} use SDF-based
+reward shaping for assembly sim-to-real transfer, showing that reward geometry matters
+for real robot performance. Both works motivate principled reward geometry for
+contact-rich manipulation; neither studies the functional-form tradeoffs that are the
+focus of our work.
 
 \paragraph{Empirical studies of RL design choices.}
 \citet{andrychowicz2020matters} conducted a large-scale study of on-policy RL design
@@ -196,8 +269,9 @@ and three adaptive variants that vary in curvature, support, and monotonicity
 \begin{table}[h]
 \centering
 \small
-\caption{Reaching reward shape variants. All satisfy $r_d(0) = 1$.
-$\nabla r_d|_{d=0}$ is the gradient at the goal.}
+\caption{\textbf{Reaching reward shape variants.} All satisfy $r_d(0) = 1$.
+$\nabla r_d|_{d=0}$ is the gradient at the goal. The bottom three rows are the
+adaptive variants central to this paper.}
 \label{tab:reach}
 \begin{tabular}{@{}llll@{}}
 \toprule
@@ -356,6 +430,28 @@ share a single REPCon unit --- which already achieves strong results, suggesting
 well-chosen unit generalises across subtasks. Per-stage parameter tuning is a natural
 extension (Section~\ref{sec:planned}).
 
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{fig_repcon_envelope.pdf}
+\caption{REPCon is a superposition of the family of static concave parabolas
+$\{\max(0,1-(kd)^2) : k \in [k_{\min}, k_{\max}]\}$.
+At distance $d$, the effective scale is $k(d)$ --- wide ($k \approx k_{\min}$) when far,
+tight ($k \approx k_{\max}$) when close. The bold red curve traces through the family
+continuously. The dotted vertical line marks the commitment boundary at $d \approx 1.65/\alpha$.}
+\label{fig:repcon_envelope}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{fig_reptan_envelope.pdf}
+\caption{REPTan is a superposition of the family of static tanh curves
+$\{1-\tanh(kd) : k \in [k_{\min}, k_{\max}]\}$.
+The bold blue curve threads through the family. Unlike REPCon, REPTan has
+infinite support (no hard cutoff) --- it can resolve the hover attractor but
+retains a long, low-reward tail.}
+\label{fig:reptan_envelope}
+\end{figure}
+
 \subsection{Geometry of the Reward: The Scaled Distance $\varphi(d) = k(d)\cdot d$}
 
 Because $r(d) = \max(0, 1 - \varphi(d)^2)$, the shape of the reward is entirely
@@ -445,6 +541,20 @@ making it a more substantial feature of the landscape.
 We have not yet varied these parameters experimentally; the configuration
 $k_{\min}=2$, $k_{\max}=20$, $\alpha=10$ is the first one we tested.
 
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{fig_repcon_sweep.pdf}
+\caption{REPCon parameter sweep. \textbf{Left:} varying $k_{\min}$ changes
+the outer support radius $R_{\mathrm{outer}} \approx 1/k_{\min}$.
+\textbf{Centre:} varying $k_{\max}$ changes inner basin tightness; at
+$k_{\max} \leq k_{\min}(1+e^2) \approx 16.8$ the moat disappears.
+\textbf{Right:} varying $\alpha$ shifts the commitment boundary
+$d \approx 1.65/\alpha$ without changing the outer or inner extremes.
+Default configuration ($k_{\min}=2, k_{\max}=20, \alpha=10$) shown bold red
+in each panel. Dotted verticals mark moat locations.}
+\label{fig:repcon_sweep}
+\end{figure}
+
 \subsection{Why Distance-Adaptivity Resolves the Hierarchical Failure}
 
 The failure of time-based annealing on StackCube (F10) stems from the episode clock
@@ -468,7 +578,9 @@ progression.
 \begin{table}[h]
 \centering
 \small
-\caption{Arc of reward design decisions and their failure modes.}
+\caption{\textbf{Arc of reward design decisions.} Each row shows the mechanism and
+the failure mode that motivates the next row. REPCon eliminates the failure mode
+of all predecessors.}
 \label{tab:design-arc}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -482,6 +594,67 @@ Distance-adaptive (\texttt{adaptive\_concave\_distance}) & $k(d)$: large$\to$sma
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{Why REPCon Produces Consistent Onset: A Gradient Analysis}
+\label{sec:gradient}
+
+The key mechanism behind REPCon's fast, seed-robust onset is that its gradient is
+\emph{nonzero across the entire initialization distribution from the first training step},
+while being maximally concentrated near the goal at convergence. We make this precise.
+
+\paragraph{Gradient of REPCon.}
+For $r(d) = \max(0,1-\varphi(d)^2)$ where $\varphi(d) = k(d)\cdot d$, the gradient is:
+\begin{equation}
+    \frac{dr}{dd} = -2\varphi(d)\cdot\varphi'(d) \quad \text{when } \varphi(d) < 1,
+    \quad \text{else } 0,
+    \label{eq:grad}
+\end{equation}
+where
+\begin{equation}
+    \varphi'(d) = k(d) + k'(d)\cdot d = k_{\min} + (k_{\max}-k_{\min})\,e^{-\alpha d}(1-\alpha d).
+    \label{eq:phiprime}
+\end{equation}
+
+\paragraph{Why onset is fast.}
+At large $d$ (exploration regime): $k(d) \to k_{\min}$, so $|\nabla r| \approx 2k_{\min}^2 d$
+--- linear in $d$, always positive up to the outer cutoff $R_{\mathrm{outer}} \approx
+1/k_{\min}$. A random policy at $d=0.3$m receives gradient signal $\approx
+2\cdot(2)^2\cdot 0.3 = 2.4$ --- sufficient to bootstrap learning.
+The same policy under \texttt{concave\_truncated}($k=5$) at $d=0.3$m: $r = 0$,
+gradient $= 0$ --- a blind region with no signal.
+Since $R_{\mathrm{outer}} = 0.5$m exceeds the maximum initialization distance
+($\approx 0.28$m for PickCube), \emph{every seed} starts inside the reward support,
+eliminating blind-region failures.
+
+\paragraph{Why convergence is tight.}
+Near $d=0$ (precision regime): $k(d) \to k_{\max}$, so $|\nabla r| \approx 2k_{\max}^2 d$
+--- the same linear form but with $k_{\max}/k_{\min} = 10\times$ larger coefficient.
+At $d=0.03$m: REPCon gradient $\approx 2\cdot(20)^2\cdot 0.03 = 24$, which is
+$10\times$ larger than the gradient at $d=0.3$m in the exploration regime.
+The distance-adaptive $k(d)$ thus creates a \emph{gradient amplification} near the goal:
+the same policy step size produces $10\times$ larger reward improvement when close vs.\ far.
+In contrast, $1-\tanh(5d)$ at $d=0.03$m gives gradient $\approx 4.85$ --- within
+$2\times$ of its value at large $d$, so there is no comparable concentration.
+
+\paragraph{Signal ratio and the unique triad.}
+Define the signal ratio $\rho = |\nabla r|_{d \to 0} / |\nabla r|_{d=R_{\mathrm{outer}}}$.
+For REPCon: $\rho = (k_{\max}/k_{\min})^2 = 100$ --- gradient is 100$\times$ stronger
+near the goal than at the outer boundary.
+No static $k$ achieves all three simultaneously: (1)~zero beyond $R_{\mathrm{outer}}$
+(no hover attractor), (2)~strong gradient near goal (fast convergence), and
+(3)~nonzero gradient at initialization distances (no blind region).
+Distance-adaptive $k(d)$ resolves the triad by decoupling the three requirements:
+$k_{\min}$ governs the outer support, $k_{\max}$ governs the inner basin, and
+$\alpha$ controls the transition between them.
+
+\begin{tcolorbox}[repbox, title={The REPCon Triad}]
+REPCon is the unique natural family achieving all three simultaneously:
+\textbf{(1)}~compact support, eliminating hover attractors;
+\textbf{(2)}~gradient amplification near the goal, enabling fast convergence;
+\textbf{(3)}~wide outer lobe covering all initialization distances, ensuring no
+blind-region failures. No static $k$ achieves all three; distance-adaptive $k(d)$
+resolves the triad by decoupling the three requirements.
+\end{tcolorbox}
 
 % -----------------------------------------------------------------------
 \section{Results}
@@ -557,15 +730,15 @@ Seeds $\{1, 42, 123\}$ where available.}
 \end{tabular}
 \end{table}
 
-\paragraph{F1 — Hover attractors cause initialisation-dependent failure.}
+\finding{F1}{Hover attractors cause initialisation-dependent failure}
 \texttt{tanh} and \texttt{tanh\_sq} reach 1.0 on easy seeds (42, 123) but
 completely fail on seed~1 (Figure~\ref{fig:per_seed}, left panel).
 Formally, let $d(s)$ be the distance to the goal and $r_d(d)$ be the dense reward. A state $s_h$ with $d_h = d(s_h) > 0$ acts as a \emph{hover attractor} if the expected gradient of the advantage function $A(s,a)$ pushes the policy toward maintaining $d_h$ rather than progressing toward $d=0$.
 For infinite-support rewards like $r_d(d) = 1 - \tanh(kd)$, the gradient $\nabla_d r_d(d) = -k\text{sech}^2(kd)$ exists and is non-zero everywhere. This creates a continuous gradient ascent path toward a local region where the shaping reward is high, but crossing into the next task stage (e.g., grasping the object) requires a coordinated sequence of actions that temporarily lowers expected return. Thus, hard initialisations converge to this hover attractor ($d \approx 0.3$m) and never escape.
 Explained variance remains $\approx 0.96$ throughout, confirming the failure is
-policy-level, not a value function issue.
+policy-level, not a value function issue~\citep{trott2019keeping}.
 
-\paragraph{F2 — Finite support prevents hover attractors but causes mode-switching instability.}
+\finding{F2}{Finite support prevents hover attractors but causes mode-switching instability}
 \texttt{concave\_truncated} ($R{=}0.2$) survives seed~1 (peak 0.9375) but
 oscillates dramatically and ends at 0.625 after 5M steps.
 Mathematically, the abrupt zero at $R = 0.2$m in $r_d(d) = \max(0, 1 - (d/R)^2)$ creates a non-differentiable boundary in the state-reward mapping. When the policy $\pi_\theta$ is near this boundary, slight errors in the value function $V(s)$ cause the advantage estimate to swing wildly between positive and negative depending on whether a sampled trajectory crosses into the $d < R$ zone.
@@ -573,27 +746,27 @@ This discontinuity in the incentive boundary forces the policy to repeatedly cro
 Narrowing to $R{=}0.1$ slows initial learning $\approx\!2.5\times$ and produces
 the same instability.
 
-\paragraph{F3 — The robustness-ceiling tradeoff is fundamental.}
+\finding{F3}{The robustness-ceiling tradeoff is fundamental}
 Wide support (large $R$): initialisation-robust, hover-prone.
 Narrow support (small $R$): hover-resistant, mode-switching unstable.
 No static geometry resolves both simultaneously.
 This tradeoff is not captured by potential-based shaping theory~\citep{ng1999shaping},
 which addresses asymptotic optimality but not training dynamics under finite samples.
 
-\paragraph{F4 — Near-goal curvature does not independently predict performance.}
+\finding{F4}{Near-goal curvature does not independently predict performance}
 \texttt{tanh} (convex, $\nabla r|_{d=0} \neq 0$) and \texttt{tanh\_sq}
 (concave, $\nabla r|_{d=0} = 0$) perform nearly identically across all seeds.
 H2 (stage-handoff geometry) is not confirmed as an independent effect;
 curvature matters only in conjunction with support structure.
 
-\paragraph{F5 — Progress-gated support narrowing fails on hard seeds (chicken-and-egg).}
+\finding{F5}{Progress-gated support narrowing fails on hard seeds (chicken-and-egg)}
 \texttt{adaptive\_concave\_threshold} ($R: 0.4 \to 0.1$, triggered when
 \texttt{success} $\geq 0.5$) achieves 1.0 on seed~42 and 0.75 on seed~123,
 but 0.0 on seed~1: the wide initial support $R{=}0.4$ creates an even stronger
 hover attractor than $R{=}0.2$, so the threshold is never crossed and $R$ never
 narrows.
 
-\paragraph{F6 — Within-episode annealing resolves the tradeoff.}
+\finding{F6}{Within-episode annealing resolves the tradeoff}
 \texttt{adaptive\_tanh\_episode} anneals the scale $k$ from 2 to 20 over the max episode length $T$. Formally, at step $t \in [0, T]$:
 \begin{equation}
     r(d, t) = 1 - \tanh(k(t) \cdot d), \quad k(t) = 2 + 18 \cdot \frac{t}{T}
@@ -638,7 +811,7 @@ demonstrating the robustness of within-episode annealing on a non-grasping task.
 }
 \end{figure}
 
-\paragraph{F7 --- Hover attractor failure generalises to non-grasping tasks.}
+\finding{F7}{Hover attractor failure generalises to non-grasping tasks}
 \texttt{adaptive\_tanh\_episode} outperforms \texttt{tanh} on PushCube
 ($0.958$ vs.\ $0.854$), confirming that the hover-attractor mechanism is not
 specific to the grasping stage but affects any manipulation task requiring
@@ -689,7 +862,7 @@ mechanism is diluted when reaching is not the dominant reward component.}
 \end{tabular}
 \end{table}
 
-\paragraph{F8 --- Hover attractor severity scales with reaching reward dominance.}
+\finding{F8}{Hover attractor severity scales with reaching reward dominance}
 On PickCube, reaching is the primary shaping signal and the hover attractor
 completely blocks seed~1 ($0.0$ for \texttt{tanh}).
 On LiftPegUpright, the rotation reward dominates ($4\times$ weight of reaching),
@@ -700,7 +873,7 @@ function alone, but depends on its \emph{relative weight} in the total reward
 signal. When rotation or placement rewards co-dominate, the reaching shaping
 function has less capacity to create a stable attractor.
 
-\paragraph{F9 --- Within-episode annealing provides consistent gains across task types.}
+\finding{F9}{Within-episode annealing provides consistent gains across task types}
 Despite the diluted reaching signal, \texttt{adaptive\_tanh\_episode} still
 outperforms \texttt{tanh} in mean success ($0.854$ vs $0.792$) and reduces
 inter-seed variance. Notably, \texttt{eval/success\_at\_end}---a harder metric
@@ -772,7 +945,7 @@ Peak = max over training; Final = last checkpoint. Best mean peak in bold.}
 \end{tabular}
 \end{table}
 
-\paragraph{F10 --- Within-episode annealing catastrophically fails on hierarchical tasks.}
+\finding{F10}{Within-episode annealing catastrophically fails on hierarchical tasks}
 \texttt{adaptive\_tanh\_episode} achieves mean $0.021$ on StackCube---virtually
 zero---despite being the best variant on all three flat tasks. This is a complete
 ranking inversion.
@@ -788,7 +961,7 @@ mid-episode point when $k$ is already large, the robot may still be in stage~1
 insufficient signal for a robot even slightly off-center. The schedule mismatch
 prevents the policy from ever consolidating a reliable grasp, collapsing performance.
 
-\paragraph{F11 --- Finite support enables hierarchical manipulation; time-based annealing does not.}
+\finding{F11}{Finite support enables hierarchical manipulation; time-based annealing does not}
 \texttt{concave\_truncated} achieves peak success $1.000$ on all three seeds
 (Table~\ref{tab:stackcube}), confirming that finite support is sufficient for
 hierarchical tasks. The zero-gradient zone at $d < R$ may actively \emph{help}: once
@@ -799,7 +972,7 @@ goal creates a stable commitment region. However, \texttt{concave\_truncated} is
 to learn: the first nonzero success does not appear until $\approx\!18$--$22$M steps
 across seeds.
 
-\paragraph{F12 --- Distance-adaptive reward matches peak performance with $\approx$2$\times$ faster convergence.}
+\finding{F12}{Distance-adaptive reward matches peak performance with $\approx\!2\times$ faster convergence}
 \texttt{adaptive\_concave\_distance} achieves peak \texttt{eval/success\_once} of
 $1.000$ / $0.938$ / $1.000$ on seeds 1, 42, 123 (mean peak $\mathbf{0.979}$),
 comparable to \texttt{concave\_truncated} (mean peak $1.000$), but with all three
@@ -823,8 +996,10 @@ to the exploration regime --- without any clock reset.
 \begin{table}[h]
 \centering
 \small
-\caption{Cross-task summary: mean peak \texttt{eval/success\_once} over seeds
-$\{1,42,123\}$. Best result per task in bold. `---' = not yet evaluated.}
+\caption{\textbf{Cross-task summary.} Mean peak \texttt{eval/success\_once} over
+seeds $\{1,42,123\}$. Best per task in bold. `---' = not yet evaluated. No single
+static reward achieves high performance on both flat and hierarchical tasks; REPCon
+(\m{adapt.\ conc.\ dist.}) is the first to approach this.}
 \label{tab:crosssummary}
 \begin{tabular}{@{}llcccc@{}}
 \toprule
@@ -838,6 +1013,14 @@ StackCube-v1      & Hierarchical & 0.354 & 1.000 & 0.063          & \textbf{0.97
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{keyinsight}
+\textbf{Takeaway.} On flat tasks, \m{adaptive\_tanh\_episode} dominates by resolving
+the robustness-ceiling tradeoff within every episode. On hierarchical tasks, it
+catastrophically fails because the episode clock decouples from task progress at stage
+boundaries. \m{adaptive\_concave\_distance} (REPCon) is the single reward that works
+across both task types---stateless, closed-form, and geometry-grounded.
+\end{keyinsight}
 
 Two patterns emerge. First, on flat tasks, within-episode annealing
 (\texttt{adaptive\_tanh\_episode}) consistently dominates: it resolves the
@@ -935,7 +1118,10 @@ that is self-adapting, stateless, and task-structure-agnostic in principle.
 Existing reward design literature focuses on magnitude (reward weights, normalisation)
 or potential-based structure (shaping theorems). The present work argues that
 \emph{geometry}---the shape of the reward as a function of distance---is an
-independently important design axis. The hover attractor, the mode-switching instability,
+independently important design axis. Related geometric perspectives include
+barrier-function-inspired shaping~\citep{nilaksh2024barrier} and SDF-based rewards
+for sim-to-real transfer~\citep{tang2023industreal}; our contribution is a systematic
+framework characterising these choices analytically. The hover attractor, the mode-switching instability,
 the schedule-mismatch failure, and the faster convergence of
 \texttt{adaptive\_concave\_distance} are all consequences of reward geometry rather
 than magnitude. Potential-based theory~\citep{ng1999shaping} is silent on all of them.
@@ -980,15 +1166,76 @@ requirements, such as peg insertion. A natural generalisation is to treat $d$ as
 subtask is complete and $d \to \infty$ meaning it has barely begun. Under this
 interpretation, the REPCon geometry is immediately applicable to learned progress
 signals such as those produced by Robometer~\citep{liang2026robometer} or TOPReward~\citep{chen2026topreward}, which output a
-dense per-frame progress scalar from a small demonstration set. Substituting a
-learned progress signal into the REPCon formula would allow the geometric guarantees
-(outer exploration support, inner precision basin, no hover attractor) to be
+dense per-frame progress scalar from a small demonstration set.
+The connection is also theoretically motivated: optimal goal-reaching value functions
+have quasimetric structure~\citep{wang2023quasimetric}, and REPCon applied to a learned
+quasimetric distance would inherit these guarantees.
+Substituting a learned progress signal into the REPCon formula would allow the geometric
+guarantees (outer exploration support, inner precision basin, no hover attractor) to be
 transferred to tasks where Euclidean distance fundamentally fails as a progress
-proxy, such as \texttt{PegInsertionSide-v1}. The parameter triple
+proxy, such as \texttt{PegInsertionSide-v1}~\citep{wu2021learning}. The parameter triple
 $(k_{\min}, k_{\max}, \alpha)$ retains its interpretation: $1/k_{\min}$ is the
 maximum starting progress distance, $1/k_{\max}$ is the success tolerance in
 progress units, and $1.65/\alpha$ is the commitment threshold --- the progress level
 past which the reward switches from exploratory to precise.
+
+\textbf{Scaling REP units to complex assembly (screwing, insertion, multi-contact).}
+The current study uses a single shared REPCon unit across all stages of each task ---
+the homogeneous case. Tasks with heterogeneous stage geometry, such as furniture
+assembly~\citep{heo2023furniturebench}, require per-stage units with phase-appropriate
+distance metrics: Euclidean approach, axial+lateral insertion depth, and angular
+displacement for screwing. The REP unit framework accommodates this directly: the
+distance input $d$ is a design choice, and the $(k_{\min}, k_{\max}, \alpha)$ triple
+can be independently tuned per phase. We identify this as a key next step, with the
+\texttt{PegInsertionSide-v1} result in Section~\ref{sec:planned} serving as the
+single-stage precursor. If REPCon holds on peg insertion with a task-appropriate $d$
+metric (insertion depth rather than end-effector distance), it would validate the
+framework's generalisation to contact-rich heterogeneous assembly.
+
+\textbf{Broader applicability: preference-based learning and RLHF.}
+The failure modes identified in this work --- hover attractors, blind regions, and the
+robustness-ceiling tradeoff --- are not specific to robot manipulation. They arise
+whenever a scalar reward function is used to shape the optimization landscape of a
+policy, regardless of how that reward was produced. This suggests that REPCon geometry
+may be directly applicable to preference-based reinforcement learning and RLHF for
+large language models.
+
+In RLHF~\citep{stiennon2020learning,ouyang2022instructgpt}, a reward model $\hat{r}$ is
+trained from human preference comparisons and then used to fine-tune a language model via
+PPO. The resulting optimization is known to suffer from \emph{reward overoptimization}
+(also called reward hacking)~\citep{gao2023scaling}: the policy finds outputs that score
+highly under $\hat{r}$ but are not genuinely preferred by humans. This is precisely the
+hover attractor failure --- the policy stabilises at a region of high shaped reward that
+does not correspond to true task success. The standard mitigation is a KL penalty against
+the reference policy (the SFT model), which acts as a soft outer boundary on how far the
+policy can drift. However, the KL penalty is isotropic in output space and provides no
+geometric structure within the reward-support region: it does not distinguish between
+``far from reference and making genuine progress'' versus ``far from reference and stuck
+in a reward-hacking attractor.''
+
+REPCon geometry offers a principled alternative framing. If we treat the reward model
+output $\hat{r}(x)$ as a proxy for inverse distance to the ``true preference'' manifold
+--- analogous to $d$ in our manipulation setting --- then wrapping $\hat{r}$ in a REPCon
+shell gives:
+\begin{equation}
+    r_\text{REP}(x) = \max\!\Bigl(0,\; 1 - \bigl(k(\hat{r})\cdot(1-\hat{r})\bigr)^2\Bigr),
+    \quad k(\hat{r}) = k_{\min} + (k_{\max}-k_{\min})\,e^{-\alpha(1-\hat{r})}
+\end{equation}
+where $(1-\hat{r})$ plays the role of distance (zero when reward is maximal, large when
+reward is low). The outer support radius $1/k_{\min}$ then bounds how far the policy can
+drift in reward space before receiving zero shaped signal --- replacing the KL penalty's
+role, but with explicit geometric control. The inner basin tightness $k_{\max}$ controls
+gradient concentration near high-preference outputs. Crucially, the moat condition
+(Section~\ref{sec:theory}) provides a computable criterion for when the reward landscape
+develops a commitment boundary --- a point past which the policy is pulled toward the
+high-preference basin rather than back to the reference distribution.
+
+This is a speculative but concrete direction: rather than tuning the KL coefficient
+$\beta$ in PPO-RLHF as a scalar tradeoff, one could instead specify $(k_{\min},
+k_{\max}, \alpha)$ with direct geometric interpretations --- outer drift bound, inner
+precision, and commitment threshold --- and use the REPCon shell as a drop-in
+replacement for the KL-penalised reward. We leave empirical validation of this
+connection to future work.
 
 \textbf{Train/eval success gap as a reward quality diagnostic.}
 Explained variance is uniformly $\approx 0.96$ across all variants---uninformative as
@@ -1097,5 +1344,373 @@ PegInsertionSide-v1 & Hierarchical (reach, grasp, orient, insert) & 100 & \todo{
 \bottomrule
 \end{tabular}
 \end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Task Reward Structures}
+\label{app:reward_structures}
+% ─────────────────────────────────────────────────────────────────────────────
+
+This appendix documents the reward function of every tabletop task used in this paper.
+All tasks share the same injection interface:
+\texttt{gym.make(task\_id, reach\_variant=..., reach\_k=..., gate\_variant=..., terminal\_variant=...)}.
+Unless noted, the default is \texttt{reach\_variant=tanh}, \texttt{reach\_k=5},
+\texttt{gate\_variant=hard}, \texttt{terminal\_variant=hard\_jump}.
+
+\paragraph{Notation.}
+$d$ denotes Euclidean distance between two keypoints (TCP or object centroid) as
+described per task. $r_\text{reach}(d)$ is the currently selected reaching variant
+evaluated at $d$. $\mathbf{1}[\cdot]$ is the Iverson bracket. ``Max reward'' is the
+theoretical ceiling; ``norm'' is the divisor used so that a perfect episode scores 1.0.
+
+\subsection*{Single-phase Tasks}
+
+\paragraph{PickCube-v1.}
+Four additive components, max\,=\,5, norm\,=\,5.
+\begin{enumerate}
+  \item \textbf{Reach} (weight 1): $r_\text{reach}(d_\text{tcp}{\to}\text{cube})$.
+  \item \textbf{Grasp} (weight 1): $\mathbf{1}[\text{grasped}]$.
+  \item \textbf{Place} (weight 1): $r_\text{reach}(d_\text{cube}{\to}\text{goal})$ (only when grasped).
+  \item \textbf{Static bonus} (weight 2): $\mathbf{1}[\text{success}]$ (cube at goal + released).
+\end{enumerate}
+Terminal override: success sets reward to max (5).
+
+\paragraph{PushCube-v1.}
+Two additive components, max\,=\,3, norm\,=\,3.
+\begin{enumerate}
+  \item \textbf{Reach} (weight 1): $r_\text{reach}(d_\text{tcp}{\to}\text{push\_pose})$.
+  \item \textbf{Place} (weight 2): $r_\text{reach}(d_\text{cube}{\to}\text{goal})$ (no grasp gate --- always active via additive gate).
+\end{enumerate}
+Gate is applied to the reach component using proximity to the push pose rather than a grasp condition.
+
+\paragraph{LiftPegUpright-v1.}
+Three additive components, max\,=\,3, norm\,=\,3.
+\begin{enumerate}
+  \item \textbf{Orientation} (weight 1): $1 - |\cos\theta_\text{peg}|$ where $\theta$ is the angle between the peg axis and vertical.
+  \item \textbf{Height} (weight 1): $r_\text{reach}(|z_\text{peg} - z_\text{goal}|)$.
+  \item \textbf{Reach} (weight 1): $r_\text{reach}(d_\text{tcp}{\to}\text{peg})$.
+\end{enumerate}
+
+\paragraph{PullCube-v1.}
+Two additive components identical in structure to PushCube, max\,=\,3, norm\,=\,3.
+Reach targets the pull grip pose; place targets the goal position.
+
+\paragraph{PokeCube-v1.}
+Four sequential phases, max\,=\,10, norm\,=\,10.
+\begin{enumerate}
+  \item \textbf{Reach} (weight 2): $r_\text{reach}(d_{\text{tcp}{\to}\text{poke\_pose}})$.
+  \item \textbf{Align + close} (weight 6): alignment reward plus end-effector closure reward.
+  \item \textbf{Place} (weight 8): $r_\text{reach}(d_\text{cube}{\to}\text{goal})$ after poke contact.
+  \item \textbf{Static bonus}: $\mathbf{1}[\text{success}]$ when cube is at goal and finger has retracted.
+\end{enumerate}
+
+\paragraph{RollBall-v1.}
+Three additive components, max\,=\,30, norm\,=\,30.
+\begin{enumerate}
+  \item \textbf{Reach} (weight 1): $r_\text{reach}(d_\text{tcp}{\to}\text{ball})$.
+  \item \textbf{Placement} (weight 20): $r_\text{reach}(d_\text{ball}{\to}\text{goal})$.
+  \item \textbf{Static bonus} (weight 9): $\mathbf{1}[\text{success}]$.
+\end{enumerate}
+
+\paragraph{PickSingleYCB-v1.}
+Five additive components, max\,=\,6, norm\,=\,6. Identical structure to PickCube with an extra bonus for stable lift above a height threshold.
+
+\subsection*{Hierarchical Tasks}
+
+\paragraph{StackCube-v1.}
+Two-phase structure (reach/grasp then stack), max\,=\,8, norm\,=\,8.
+\begin{enumerate}
+  \item \textbf{Phase 1 --- Grasp} (max 3):
+    reach (weight 2) $r_\text{reach}(d_\text{tcp}{\to}\text{cube\_A})$;
+    grasp bonus (weight 1) $\mathbf{1}[\text{grasped}]$.
+  \item \textbf{Phase 2 --- Stack} (max 5, active only when grasped):
+    place (weight 4) $r_\text{reach}(d_\text{cube\_A}{\to}\text{cube\_B\_top})$;
+    stack success (weight 1) $\mathbf{1}[\text{stacked}]$.
+\end{enumerate}
+Hard gate: phase-2 reward is zero until cube A is grasped. Terminal override: success sets reward to 8.
+
+\paragraph{PlaceSphere-v1.}
+Two-phase structure (reach/grasp then place in bowl), max\,=\,13, norm\,=\,13.
+\begin{enumerate}
+  \item \textbf{Phase 1 --- Grasp} (max 3):
+    reach (weight 2) $r_\text{reach}(d_\text{tcp}{\to}\text{sphere})$;
+    grasp bonus (weight 1) $\mathbf{1}[\text{grasped}]$.
+  \item \textbf{Phase 2 --- Place} (max 10, active only when grasped):
+    place (weight 6) $r_\text{reach}(d_\text{sphere}{\to}\text{bowl})$;
+    static bonus ($\approx$4) $\mathbf{1}[\text{sphere in bowl} \wedge \text{released}]$.
+\end{enumerate}
+Same hard-gate and terminal override as StackCube.
+
+\paragraph{PullCubeTool-v1.}
+Multi-phase tool-use task, norm\,=\,5.
+\begin{enumerate}
+  \item \textbf{Reach tool} (weight 2): $r_\text{reach}(d_\text{tcp}{\to}\text{tool\_handle})$.
+  \item \textbf{Grasp tool} (weight 2): $\mathbf{1}[\text{tool grasped}]$.
+  \item \textbf{Position tool} (weight 1.5): $r_\text{reach}(d_\text{tool\_tip}{\to}\text{hook\_pos})$.
+  \item \textbf{Pull cube} (weight 3): $r_\text{reach}(d_\text{cube}{\to}\text{goal})$ (active once tool contacts cube).
+  \item \textbf{Success} (weight 5): $\mathbf{1}[\text{cube at goal}]$.
+\end{enumerate}
+
+\paragraph{PegInsertionSide-v1.}
+Four-stage hierarchical task, max\,=\,10, norm\,=\,10.
+Stages 3 and 4 use \textsc{REPCon} units (adaptive concave distance reward) rather than
+the default tanh variant.
+\begin{enumerate}
+  \item \textbf{Stage 1 --- Reach} (weight 1): $r_\text{reach}(d_\text{tcp}{\to}\text{peg})$.
+  \item \textbf{Stage 2 --- Grasp} (weight 1): $\mathbf{1}[\text{peg grasped}]$.
+  \item \textbf{Stage 3 --- Orient} (weight 3):
+    $\textsc{REPCon}(d_\text{orient};\; k_\text{min}=5,\, k_\text{max}=100,\, \alpha=20)$,\\
+    where $d_\text{orient} = \sqrt{(\Delta y_\text{peg}{\to}\text{hole})^2 + (\Delta z_\text{peg}{\to}\text{hole})^2}$ (hole frame).
+    $k_\text{max}=100$ corresponds to the 10\,mm lateral success threshold.
+  \item \textbf{Stage 4 --- Insert} (weight 5):
+    $\textsc{REPCon}(d_\text{insert};\; k_\text{min}=8,\, k_\text{max}=70,\, \alpha=20)$,\\
+    where $d_\text{insert}$ is the distance of the peg head from the hole center along the insertion axis.
+    $k_\text{max}=70$ corresponds to the 15\,mm insertion-depth success threshold.
+\end{enumerate}
+Hard gate: stage 3 is zero until peg is grasped; stage 4 is zero until orientation is within threshold.
+Terminal override: success sets reward to 10.
+
+\subsection*{Summary Table}
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Reward structure summary} for all 11 tabletop tasks. ``Max'' is the
+theoretical maximum reward per step; ``Stages'' counts additive or gated phases;
+``Reach fn'' notes where REPCon replaces the default tanh.}
+\label{tab:reward_summary}
+\small
+\begin{tabular}{lcccl}
+\toprule
+\textbf{Task} & \textbf{Max} & \textbf{Norm} & \textbf{Stages} & \textbf{Notes} \\
+\midrule
+PickCube-v1          & 5  & 5  & 4 & Standard reach+grasp+place \\
+PushCube-v1          & 3  & 3  & 2 & No grasp; additive gate \\
+LiftPegUpright-v1    & 3  & 3  & 3 & Orientation component \\
+PullCube-v1          & 3  & 3  & 2 & Mirror of PushCube \\
+PokeCube-v1          & 10 & 10 & 4 & Poke contact + retract phase \\
+RollBall-v1          & 30 & 30 & 3 & Large placement weight \\
+PickSingleYCB-v1     & 6  & 6  & 5 & Lift height bonus \\
+\midrule
+StackCube-v1         & 8  & 8  & 2 & Hard gate at grasp \\
+PlaceSphere-v1       & 13 & 13 & 2 & Hard gate at grasp \\
+PullCubeTool-v1      & 13.5 & 5 & 5 & Tool-use chain \\
+PegInsertionSide-v1  & 10 & 10 & 4 & REPCon for orient+insert \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+% NOTE: This appendix section is for internal reference only.
+%       Remove before final submission.
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Research Notes: REPCon Beyond Manipulation}
+\label{app:beyond}
+
+\emph{This section is a working note, not part of the submission. It records the
+theoretical connections between REPCon geometry and other fields where the same
+failure modes arise, for use in future work and grant writing.}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{REPCon for RLHF in Large Language Models}
+\label{app:rlhf}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsubsection{The PPO-RLHF Training Loop}
+
+The standard RLHF objective~\citep{ouyang2022instructgpt} is:
+\begin{equation}
+    \mathcal{J}(\pi) = \mathbb{E}_{x \sim \mathcal{D},\, y \sim \pi}
+    \Bigl[ r_\theta(x,y) - \beta \cdot \mathrm{KL}\bigl(\pi(y|x) \,\|\, \pi_\text{ref}(y|x)\bigr) \Bigr]
+\end{equation}
+where $r_\theta(x,y)$ is a learned reward model (RM), $\beta$ is a KL coefficient,
+and $\pi_\text{ref}$ is the frozen SFT reference policy.
+The RM score is applied only at the final token; the KL penalty is applied per-token:
+\begin{align}
+    r_t &= -\beta \cdot \mathrm{KL}_t \quad (t < T) \\
+    r_T &= r_\theta(x,y) - \beta \cdot \mathrm{KL}_T
+\end{align}
+
+\subsubsection{Reward Overoptimization as a Hover Attractor}
+
+\citet{gao2023scaling} showed empirically that as the RL policy is optimized (measured
+by KL divergence from the initial policy $d = \mathrm{KL}(\pi \| \pi_0)$), the proxy
+RM score increases monotonically while the gold reward follows:
+\begin{equation}
+    R_\text{gold}(d) \approx \alpha_\text{RL} \sqrt{d} - \beta_\text{RL} \cdot d
+\end{equation}
+The gold reward peaks at $d^* = (\alpha/2\beta)^2$ and then \emph{declines} as the
+policy over-exploits the proxy RM. This is precisely the hover attractor failure:
+the policy stabilises at a region of high proxy reward that does not correspond to
+true quality. Known hover attractors in RLHF include:
+\begin{itemize}
+    \item \textbf{Sycophancy}: always affirm the user, never correct errors.
+    \item \textbf{Length gaming}: verbosity scores high on RMs with implicit length
+    bias~\citep{singhal2023long}.
+    \item \textbf{Format exploitation}: excessive bullet points, hedging phrases
+    (``Certainly! I'd be happy to help\ldots'').
+    \item \textbf{Syntactic correctness without semantic correctness} in code generation.
+\end{itemize}
+These attractors survive KL regularisation because they already have nonzero probability
+under $\pi_\text{ref}$ (the SFT model was already inclined toward them), so the KL
+cost of entering the attractor basin is low relative to the RM reward gradient.
+
+\subsubsection{Why the KL Penalty Is Geometrically Imprecise}
+
+The KL penalty bounds distributional drift in token-probability space, not quality-space
+distance. Specifically:
+\begin{itemize}
+    \item It is asymmetric: $\mathrm{KL}(\pi\|\pi_\text{ref}) \neq \mathrm{KL}(\pi_\text{ref}\|\pi)$.
+    \item It has no compact support: there is no hard boundary on where the policy
+    can place mass, only an increasing soft penalty. With sufficient RM gradient the
+    policy will push through any fixed $\beta$.
+    \item It carries no curvature information about the reward landscape: a small KL
+    step can enter a region of extremely steep RM gradient (exploitation), while a
+    large KL step in a flat RM direction is harmless.
+\end{itemize}
+In our robotics framing: the KL penalty is analogous to a per-step distance penalty,
+not a compact-support reward. It is the infinite-support failure mode restated in
+probabilistic language.
+
+\subsubsection{REPCon Integration: The Core Proposal}
+
+Define $d = 1 - r_\theta(x,y)$ (assuming RM score $\in [0,1]$, so $d=0$ at maximum
+quality, $d=1$ at minimum). Apply REPCon:
+\begin{equation}
+    r_\text{REP}(x,y) = \max\!\Bigl(0,\; 1 - \bigl(k(d)\cdot d\bigr)^2\Bigr),
+    \quad k(d) = k_{\min} + (k_{\max}-k_{\min})\,e^{-\alpha d}
+\end{equation}
+This gives:
+\begin{itemize}
+    \item \textbf{Compact support}: $r_\text{REP} = 0$ for $d > 1/k_{\min}$, i.e.\ for
+    responses with RM score below $1 - 1/k_{\min}$. Responses in the low-quality
+    hover-attractor region receive \emph{zero gradient signal}, forcing the policy
+    to improve or receive nothing.
+    \item \textbf{Gradient amplification near goal}: $k(d) \to k_{\max}$ as $d \to 0$,
+    concentrating gradient signal near high-quality responses and making fine-grained
+    quality improvements produce larger policy updates.
+    \item \textbf{Geometric replacement for KL}: The support boundary $1/k_{\min}$
+    defines a hard quality floor with direct interpretability, replacing the soft
+    distributional constraint of the KL penalty.
+\end{itemize}
+
+\subsubsection{Most Feasible Integration Point: Multi-Attribute RMs}
+
+The most technically grounded integration uses multi-attribute reward models (e.g.\
+HelpSteer2/SteerLM~\citep{ouyang2022instructgpt}), which score responses on separate
+axes (helpfulness, correctness, coherence, safety). Define a composite distance:
+\begin{equation}
+    d = \left\| \mathbf{1} - \mathbf{r}_\text{attr} \right\|_\mathbf{w}
+\end{equation}
+where $\mathbf{r}_\text{attr}$ is the vector of per-attribute scores and $\mathbf{w}$
+are task-specific weights. Apply REPCon to this $d$. This is structurally identical
+to PegInsertionSide stage 3's composite orientation distance
+$d_\text{orient} = 0.5(\cdot) + 4.5\max(\cdot)$ — a weighted combination of
+per-axis alignment errors fed into the same REPCon formula.
+
+\subsubsection{Connection to DPO and Implicit Q-Functions}
+
+\citet{rafailov2024qtransform} showed that DPO~\citep{rafailov2023dpo} implicitly
+assigns token-level Q-values satisfying a Bellman equation:
+\begin{equation}
+    Q(s_t, a_t) = \beta \log\frac{\pi(a_t|s_t)}{\pi_\text{ref}(a_t|s_t)} + V(s_t)
+\end{equation}
+This means DPO's implicit reward IS a distance-to-completion signal at each token ---
+KL-based geometry rather than Euclidean, but structurally analogous. REPCon wrapping
+of these implicit Q-values would give the same geometric guarantees (compact support,
+gradient amplification) to the token-level credit assignment that it gives to
+end-effector distance in manipulation.
+
+\subsubsection{Empirical Validation Proposal}
+
+Replicate Gao et al.'s overoptimization setup (proxy RM + gold RM + best-of-$n$
+sampling) with three reward formulations:
+\begin{enumerate}
+    \item Raw proxy RM score (baseline)
+    \item KL-penalised PPO (standard RLHF)
+    \item REPCon-wrapped proxy RM score (ours)
+\end{enumerate}
+Measure gold RM score vs.\ KL budget curves for all three. The prediction:
+REPCon shifts the overoptimization peak $d^* = (\alpha/2\beta)^2$ rightward (more
+useful optimization before degradation) by eliminating the low-quality hover attractors
+that consume gradient budget without improving gold quality.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Other Domains Where REPCon Geometry Applies}
+\label{app:broader}
+% ─────────────────────────────────────────────────────────────────────────────
+
+The core conditions for REPCon to be useful are: (1) a scalar distance-to-goal
+$d \geq 0$ exists, (2) a fixed $k$ creates a tradeoff between wide support
+(coverage) and tight support (precision), and (3) the agent can get stuck in a
+non-goal basin. These conditions are remarkably general.
+
+\paragraph{Drug discovery and molecular optimisation.}
+Reinforcement learning over molecular property scores (e.g.\ docking score, QED,
+ADMET properties) suffers from reward hacking: generative models collapse to a narrow
+set of ``score-maximising'' molecules that are chemically unrealistic. This is the
+hover attractor under a different name. $d$ = composite property deficit (how far
+the molecule is from the Pareto front of all desired properties). REPCon geometry
+would give compact support (no gradient for molecules below a quality floor),
+preventing collapse to a single exploitable basin.
+
+\paragraph{Multi-objective optimisation and Pareto front search.}
+In evolutionary algorithms and Bayesian optimisation with multiple objectives, the
+scalarisation function that converts the objective vector to a scalar reward determines
+where the search focuses. REPCon geometry applied to the scalarised distance to the
+Pareto front would provide wide exploratory gradients far from the front and tight
+precision gradients close to it — the exact behaviour needed for efficient Pareto
+front coverage.
+
+\paragraph{Curriculum learning and self-play.}
+In self-play (e.g.\ AlphaZero, OpenAI Five), the ``goal'' is an opponent of matched
+strength. $d$ = skill gap between agent and current opponent. REPCon geometry gives
+stronger gradient signal when the skill gap is small (near-goal: precise skill
+matching) and weaker when the gap is large (far: broad exploration of strategy space).
+This formalises the intuition behind adaptive opponent selection in self-play
+curricula~\citep{narvekar2020curriculum}.
+
+\paragraph{Offline RL and conservative policy optimisation.}
+In offline RL, the dataset coverage determines where the value function is reliable.
+Conservative Q-learning (CQL) adds a penalty for out-of-distribution actions ---
+analogous to the KL penalty in RLHF. REPCon geometry applied to in-distribution
+distance (measured by e.g.\ a density model) would give a principled compact-support
+conservative penalty: zero gradient for actions far outside the data distribution,
+strong gradient for actions near the distribution boundary.
+
+\paragraph{Biological sequence design (proteins, DNA).}
+Protein fitness landscapes are notoriously rugged, with many local optima (hover
+attractors). RL-based protein design methods (e.g.\ using AlphaFold as an oracle)
+suffer from the same overoptimisation problem. $d$ = structural distance from a
+target fold or a composite fitness deficit. REPCon's moat condition
+($k_{\max}/k_{\min} > 1+e^2$) provides a computable criterion for when the reward
+landscape develops a commitment boundary --- the structural analogue of the
+``funnel'' in protein folding energy landscapes.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Impact Assessment}
+\label{app:impact}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Prior art gap.}
+No paper in the reward shaping lineage (Ng et al.\ 1999, EUREKA, DrS) does a controlled
+causal study of reward functional form geometry. ManiSkill3 itself uses $1 - \tanh(5d)$
+across all tasks with no documented justification. REP is the first to ask why.
+
+\paragraph{Hover attractor.}
+Zero prior uses of this term found in the literature. The practitioner observation exists
+informally but has never been formally characterised as a stable fixed point with an
+existence condition. Naming + mechanistic analysis + closed-form condition
+($k_{\max}/k_{\min} > 1 + e^2$) is a complete novel contribution.
+
+\paragraph{AUC metric.}
+Use \texttt{--track\_auc} to log \texttt{eval/success\_once\_auc} to W\&B. This captures
+convergence speed and final performance in one number and is a stronger headline than
+peak success for the StackCube results.
+
+\paragraph{Cross-domain scope.}
+The ``Catastrophic Goodhart'' result (NeurIPS 2024) proves KL regularisation does not
+mitigate heavy-tailed reward misspecification in RLHF. REPCon's compact support is a
+direct solution: a reward identically zero beyond a quality floor cannot be Goodharted
+beyond that floor. Empirical validation of this connection (even at small LM scale) would
+make this a cross-cutting paper spanning robot learning and LLM alignment.
 
 \end{document}

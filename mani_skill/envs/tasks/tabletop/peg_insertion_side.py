@@ -6,13 +6,13 @@ import torch
 
 from mani_skill.agents.robots.panda import PandaWristCam
 from mani_skill.envs.sapien_env import BaseEnv
+from mani_skill.envs.tasks.tabletop.reward_variants.reaching import AdaptiveDistanceReward
 from mani_skill.envs.tasks.tabletop.reward_variants import (
     VALID_REACHING_VARIANTS,
     build_reach_fn,
     apply_gate,
     apply_terminal,
 )
-from mani_skill.envs.tasks.tabletop.reward_variants.reaching import AdaptiveDistanceReward
 from mani_skill.envs.scene import ManiSkillScene
 from mani_skill.envs.utils import randomization
 from mani_skill.sensors.camera import CameraConfig
@@ -89,15 +89,15 @@ class PegInsertionSideEnv(BaseEnv):
         reach_k_max: float = 20.0,
         reach_alpha: float = 10.0,
         # REP unit for stage 3 (orientation alignment)
-        # d = composite yz offset; success at ~0.01m; starts ~0.05-0.15m
-        orient_k_min: float = 5.0,
-        orient_k_max: float = 100.0,
-        orient_alpha: float = 20.0,
+        # original: 1 - tanh(composite_yz), k=1 → k_min=1 preserves outer support
+        orient_k_min: float = 1.0,
+        orient_k_max: float = 10.0,
+        orient_alpha: float = 10.0,
         # REP unit for stage 4 (axial insertion)
-        # d = 3D dist inside hole; starts ~peg_half_length (~0.1m); success at ~0.015m
-        insert_k_min: float = 8.0,
-        insert_k_max: float = 70.0,
-        insert_alpha: float = 20.0,
+        # original: 1 - tanh(5*d_insert), k=5 → k_min=2 per standard REPCon defaults
+        insert_k_min: float = 2.0,
+        insert_k_max: float = 20.0,
+        insert_alpha: float = 10.0,
         **kwargs,
     ):
         if reach_variant not in VALID_REACHING_VARIANTS:
@@ -106,8 +106,14 @@ class PegInsertionSideEnv(BaseEnv):
         self.reach_variant = reach_variant
         self.gate_variant = gate_variant
         self.terminal_variant = terminal_variant
-        self.orient_fn = AdaptiveDistanceReward(k_min=orient_k_min, k_max=orient_k_max, alpha=orient_alpha, mode="concave")
-        self.insert_fn = AdaptiveDistanceReward(k_min=insert_k_min, k_max=insert_k_max, alpha=insert_alpha, mode="concave")
+        # For stages 3+4: use dedicated REPCon units when reach_variant is adaptive_concave_distance,
+        # otherwise fall back to the same reach_fn so baselines are comparable
+        if reach_variant == "adaptive_concave_distance":
+            self.orient_fn = AdaptiveDistanceReward(k_min=orient_k_min, k_max=orient_k_max, alpha=orient_alpha, mode="concave")
+            self.insert_fn = AdaptiveDistanceReward(k_min=insert_k_min, k_max=insert_k_max, alpha=insert_alpha, mode="concave")
+        else:
+            self.orient_fn = self.reach_fn
+            self.insert_fn = self.reach_fn
         if reconfiguration_freq is None:
             if num_envs == 1:
                 reconfiguration_freq = 1
@@ -315,8 +321,8 @@ class PegInsertionSideEnv(BaseEnv):
         )
 
     def evaluate(self):
-        success, peg_head_pos_at_hole = self.has_peg_inserted()
-        return dict(success=success, peg_head_pos_at_hole=peg_head_pos_at_hole)
+        success, _ = self.has_peg_inserted()
+        return dict(success=success)
 
     def _get_obs_extra(self, info: Dict):
         obs = dict(tcp_pose=self.agent.tcp.pose.raw_pose)
@@ -361,13 +367,14 @@ class PegInsertionSideEnv(BaseEnv):
         peg_wrt_goal = self.goal_pose.inv() * self.peg.pose
         peg_wrt_goal_yz_dist = torch.linalg.norm(peg_wrt_goal.p[:, 1:], axis=1)
 
-        # REP unit for orientation alignment: composite yz distance → REPCon
-        # Wide support when far from alignment (k→k_min), tight near success threshold (k→k_max)
-        d_orient = (
+        composite_yz = (
             0.5 * (peg_head_wrt_goal_yz_dist + peg_wrt_goal_yz_dist)
             + 4.5 * torch.maximum(peg_head_wrt_goal_yz_dist, peg_wrt_goal_yz_dist)
         )
-        pre_insertion_reward = 3 * self.orient_fn(d_orient)
+        if self.reach_variant == "adaptive_concave_distance":
+            pre_insertion_reward = 3 * self.orient_fn(composite_yz)
+        else:
+            pre_insertion_reward = 3 * (1 - torch.tanh(composite_yz))
         reward += pre_insertion_reward * is_grasped
         # stage 3 passes if peg is correctly oriented in order to insert into hole easily
         pre_inserted = (peg_head_wrt_goal_yz_dist < 0.01) & (
@@ -376,10 +383,11 @@ class PegInsertionSideEnv(BaseEnv):
 
         # Stage 4: Insert the peg into the hole once it is grasped and lined up
         peg_head_wrt_goal_inside_hole = self.box_hole_pose.inv() * self.peg_head_pose
-        # REP unit for insertion: 3D distance inside hole → REPCon
-        # Starts at ~peg half-length (~0.1m); success at ~0.015m
         d_insert = torch.linalg.norm(peg_head_wrt_goal_inside_hole.p, axis=1)
-        insertion_reward = 5 * self.insert_fn(d_insert)
+        if self.reach_variant == "adaptive_concave_distance":
+            insertion_reward = 5 * self.insert_fn(d_insert)
+        else:
+            insertion_reward = 5 * (1 - torch.tanh(5.0 * d_insert))
         reward += insertion_reward * (is_grasped & pre_inserted)
 
         reward[info["success"]] = 10

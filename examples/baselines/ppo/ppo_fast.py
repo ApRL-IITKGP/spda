@@ -82,6 +82,8 @@ class Args:
     """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
     eval_freq: int = 25
     """evaluation frequency in terms of iterations"""
+    track_auc: bool = False
+    """if True, log eval/success_once_auc (area under the success curve) to W&B"""
     save_train_video_freq: Optional[int] = None
     """frequency to save training videos in terms of iterations"""
     control_mode: Optional[str] = "pd_joint_delta_pos"
@@ -102,17 +104,17 @@ class Args:
     """distance-adaptive reward: k value at goal (controls inner basin tightness ~1/k_max)"""
     reach_alpha: float = 10.0
     """distance-adaptive reward: transition rate; moat location ~1.65/alpha"""
-    orient_k_min: float = 5.0
+    orient_k_min: float = 1.0
     """PegInsertion stage-3 REP unit: k far from alignment (R=1/k_min)"""
-    orient_k_max: float = 100.0
-    """PegInsertion stage-3 REP unit: k at alignment (R=1/k_max ≈ success threshold)"""
-    orient_alpha: float = 20.0
+    orient_k_max: float = 10.0
+    """PegInsertion stage-3 REP unit: k at alignment"""
+    orient_alpha: float = 10.0
     """PegInsertion stage-3 REP unit: transition rate"""
-    insert_k_min: float = 8.0
-    """PegInsertion stage-4 REP unit: k far from hole (R=1/k_min ≈ peg half-length)"""
-    insert_k_max: float = 70.0
-    """PegInsertion stage-4 REP unit: k inside hole (R=1/k_max ≈ success threshold)"""
-    insert_alpha: float = 20.0
+    insert_k_min: float = 2.0
+    """PegInsertion stage-4 REP unit: k far from hole"""
+    insert_k_max: float = 20.0
+    """PegInsertion stage-4 REP unit: k inside hole"""
+    insert_alpha: float = 10.0
     """PegInsertion stage-4 REP unit: transition rate"""
 
     # Algorithm specific arguments
@@ -481,6 +483,7 @@ if __name__ == "__main__":
     pbar = tqdm.tqdm(range(1, args.num_iterations + 1))
 
     cumulative_times = defaultdict(float)
+    success_auc_accum = 0.0  # running sum of eval/success_once values
 
     for iteration in pbar:
         agent.eval()
@@ -503,10 +506,15 @@ if __name__ == "__main__":
                 eval_metrics_mean[k] = mean
                 if logger is not None:
                     logger.add_scalar(f"eval/{k}", mean, global_step)
-            pbar.set_description(
-                f"success_once: {eval_metrics_mean['success_once']:.2f}, "
-                f"return: {eval_metrics_mean['return']:.2f}"
-            )
+            if eval_metrics_mean:
+                pbar.set_description(
+                    f"success_once: {eval_metrics_mean.get('success_once', float('nan')):.2f}, "
+                    f"return: {eval_metrics_mean.get('return', float('nan')):.2f}"
+                )
+            if args.track_auc and logger is not None and "success_once" in eval_metrics_mean:
+                s = float(eval_metrics_mean["success_once"])
+                success_auc_accum += s
+                logger.add_scalar("eval/success_once_auc", success_auc_accum, global_step)
             if logger is not None:
                 eval_time = time.perf_counter() - stime
                 cumulative_times["eval_time"] += eval_time
