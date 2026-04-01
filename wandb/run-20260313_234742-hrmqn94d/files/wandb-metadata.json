@@ -1,0 +1,61 @@
+{
+  "os": "Linux-6.8.0-101-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.10.12",
+  "startedAt": "2026-03-13T18:17:42.970787Z",
+  "args": [
+    "--env_id",
+    "StackCube-v1",
+    "--reach_variant",
+    "tanh",
+    "--reach_k",
+    "2.0",
+    "--num_envs",
+    "256",
+    "--total_timesteps",
+    "40000000",
+    "--track",
+    "--wandb_entity",
+    "agv_rego",
+    "--wandb_project_name",
+    "REP",
+    "--wandb_group",
+    "REP",
+    "--seed",
+    "1"
+  ],
+  "program": "/home/theya/REP/REP/examples/baselines/ppo/ppo_fast.py",
+  "codePath": "examples/baselines/ppo/ppo_fast.py",
+  "codePathLocal": "examples/baselines/ppo/ppo_fast.py",
+  "git": {
+    "remote": "https://github.com/ApRL-IITKGP/REP.git",
+    "commit": "e4bd8e93c5f500359e3a5d6be495e6ee2cd88757"
+  },
+  "email": "theyanesher@kgpian.iitkgp.ac.in",
+  "root": "/home/theya/REP/REP",
+  "host": "theya-Dell-G15-5530",
+  "executable": "/home/theya/REP/REP/rep/bin/python",
+  "cpu_count": 14,
+  "cpu_count_logical": 20,
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "499430440960",
+      "used": "430612750336"
+    }
+  },
+  "memory": {
+    "total": "16436490240"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "memoryTotal": "8585740288",
+      "cudaCores": 3072,
+      "architecture": "Ada",
+      "uuid": "GPU-85843b45-d32a-8c68-ccec-299f62a8fa80"
+    }
+  ],
+  "cudaVersion": "12.8",
+  "writerId": "lllu78c0p7a05g3qeyqz0f1r74bl08ot"
+}

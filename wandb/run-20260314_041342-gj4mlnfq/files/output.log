@@ -1,0 +1,41 @@
+success_once: 0.00, return: 17.80:   1%|▊                                                                                           | 29/3125 [00:56<1:41:08,  1.96s/it]
+Traceback (most recent call last):
+  File "/home/theya/REP/REP/examples/baselines/ppo/ppo_fast.py", line 523, in <module>
+    next_obs, next_done, container, final_values = rollout(next_obs, next_done)
+  File "/home/theya/REP/REP/examples/baselines/ppo/ppo_fast.py", line 241, in rollout
+    next_obs, reward, next_done, infos = step_func(action)
+  File "/home/theya/REP/REP/examples/baselines/ppo/ppo_fast.py", line 420, in step_func
+    next_obs, reward, terminations, truncations, info = envs.step(action)
+  File "/home/theya/REP/REP/mani_skill/vector/wrappers/gymnasium.py", line 111, in step
+    obs, rew, terminations, truncations, infos = self._env.step(actions)
+  File "/home/theya/REP/REP/mani_skill/utils/registration.py", line 161, in step
+    observation, reward, terminated, truncated, info = self.env.step(action)
+  File "/home/theya/REP/REP/rep/lib/python3.10/site-packages/gymnasium/wrappers/order_enforcing.py", line 56, in step
+    return self.env.step(action)
+  File "/home/theya/REP/REP/mani_skill/envs/sapien_env.py", line 956, in step
+    action = self._step_action(action)
+  File "/home/theya/REP/REP/mani_skill/envs/sapien_env.py", line 1031, in _step_action
+    self.scene._gpu_fetch_all()
+  File "/home/theya/REP/REP/mani_skill/envs/scene.py", line 929, in _gpu_fetch_all
+    self.px.gpu_fetch_articulation_link_velocity()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/theya/REP/REP/examples/baselines/ppo/ppo_fast.py", line 523, in <module>
+    next_obs, next_done, container, final_values = rollout(next_obs, next_done)
+  File "/home/theya/REP/REP/examples/baselines/ppo/ppo_fast.py", line 241, in rollout
+    next_obs, reward, next_done, infos = step_func(action)
+  File "/home/theya/REP/REP/examples/baselines/ppo/ppo_fast.py", line 420, in step_func
+    next_obs, reward, terminations, truncations, info = envs.step(action)
+  File "/home/theya/REP/REP/mani_skill/vector/wrappers/gymnasium.py", line 111, in step
+    obs, rew, terminations, truncations, infos = self._env.step(actions)
+  File "/home/theya/REP/REP/mani_skill/utils/registration.py", line 161, in step
+    observation, reward, terminated, truncated, info = self.env.step(action)
+  File "/home/theya/REP/REP/rep/lib/python3.10/site-packages/gymnasium/wrappers/order_enforcing.py", line 56, in step
+    return self.env.step(action)
+  File "/home/theya/REP/REP/mani_skill/envs/sapien_env.py", line 956, in step
+    action = self._step_action(action)
+  File "/home/theya/REP/REP/mani_skill/envs/sapien_env.py", line 1031, in _step_action
+    self.scene._gpu_fetch_all()
+  File "/home/theya/REP/REP/mani_skill/envs/scene.py", line 929, in _gpu_fetch_all
+    self.px.gpu_fetch_articulation_link_velocity()
+KeyboardInterrupt
