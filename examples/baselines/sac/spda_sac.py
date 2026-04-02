@@ -14,7 +14,7 @@ Reference: https://github.com/rail-berkeley/hil-serl
 Paper    : https://arxiv.org/abs/2410.21845
 """
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 import os
 import random
@@ -171,6 +171,10 @@ class Args:
     """fraction of each batch drawn from the demo buffer (0 = no demos)"""
     critic_threshold: Optional[float] = None
     """if the Q value goes below this threshold, the policy will stop exploring and follow the gt traj from the replay buffer"""
+    critic_activation_return_threshold: Optional[float] = None
+    """enable critic-threshold action replacement only after recent avg episode return reaches this value"""
+    critic_activation_return_window: int = 100
+    """number of recent completed episodes used to compute avg episode return for critic activation"""
 
     # ---- Encoder ----
     encoder_type: str = "resnet"
@@ -919,6 +923,9 @@ if __name__ == "__main__":
     actor_loss = qf1_loss = qf2_loss = alpha_loss = torch.tensor(0.0)
     qf1_a_values = qf2_a_values = torch.tensor(0.0)
 
+    critic_gate_active = args.critic_activation_return_threshold is None
+    recent_episode_returns = deque(maxlen=args.critic_activation_return_window)
+
     while global_step < args.total_timesteps:
 
         # -------------------------------------------------------------------
@@ -999,20 +1006,26 @@ if __name__ == "__main__":
                 with torch.no_grad():
                     actions, _, _, visual_feature = actor.get_action(obs)
 
-            if args.critic_threshold is not None and use_demos and demo_rb is not None and len(demo_rb) > 0:
+            if (
+                args.critic_threshold is not None
+                and critic_gate_active
+                and use_demos
+                and demo_rb is not None
+                and len(demo_rb) > 0
+            ):
                 with torch.no_grad():
                     if visual_feature is None:
                         visual_feature = actor.encoder(obs)
                     q1 = qf1(obs, actions, visual_feature)
                     q2 = qf2(obs, actions, visual_feature)
-                    q = torch.min(q1, q2).squeeze(-1)
+                    q = torch.min(q1, q2).squeeze(-1) # critic value
 
-                    replace_mask = q < args.critic_threshold
+                    replace_mask = q < args.critic_threshold # based on low critic value, take actions from demo buffer
                     if replace_mask.any():
                         state_diff = obs["state"].unsqueeze(1) - demo_rb.obs["state"].unsqueeze(0)
                         dist = (state_diff ** 2).sum(-1)
                         min_idx = dist.argmin(-1)
-                        actions[replace_mask] = demo_rb.actions[min_idx[replace_mask]]
+                        actions[replace_mask] = demo_rb.actions[min_idx[replace_mask]] # replace with closest demo action
 
             next_obs, rewards, terminations, truncations, infos = envs.step(actions)
             real_next_obs = {k: v.clone() for k, v in next_obs.items()}
@@ -1032,10 +1045,22 @@ if __name__ == "__main__":
                 done_mask = infos["_final_info"]
                 for k in real_next_obs:
                     real_next_obs[k][need_final_obs] = infos["final_observation"][k][need_final_obs].clone()
+
+                if "return" in final_info["episode"]:
+                    done_returns = final_info["episode"]["return"][done_mask].float()
+                    if done_returns.numel() > 0:
+                        recent_episode_returns.extend(done_returns.detach().cpu().tolist())
+                        if (not critic_gate_active and len(recent_episode_returns) == args.critic_activation_return_window and (sum(recent_episode_returns) / len(recent_episode_returns)) >= args.critic_activation_return_threshold
+                        ):
+                            critic_gate_active = True
+
                 if logger is not None:
                     ep_log = {}
                     for k, v in final_info["episode"].items():
                         ep_log[f"train/{k}"] = v[done_mask].float().mean().item()
+                    ep_log["train/critic_gate_active"] = float(critic_gate_active)
+                    if len(recent_episode_returns) > 0:
+                        ep_log["train/recent_avg_return"] = sum(recent_episode_returns) / len(recent_episode_returns)
                     logger.log(ep_log, step=global_step)
 
             rb.add(obs, real_next_obs, actions, rewards, stop_bootstrap)
