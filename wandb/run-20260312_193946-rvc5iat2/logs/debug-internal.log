@@ -1,6 +1,0 @@
-{"time":"2026-03-12T19:39:46.956700876+05:30","level":"INFO","msg":"stream: starting","core version":"0.24.1"}
-{"time":"2026-03-12T19:39:47.890632231+05:30","level":"INFO","msg":"stream: created new stream","id":"rvc5iat2"}
-{"time":"2026-03-12T19:39:47.890747101+05:30","level":"INFO","msg":"handler: started","stream_id":"rvc5iat2"}
-{"time":"2026-03-12T19:39:47.890982413+05:30","level":"INFO","msg":"stream: started","id":"rvc5iat2"}
-{"time":"2026-03-12T19:39:47.891021094+05:30","level":"INFO","msg":"sender: started","stream_id":"rvc5iat2"}
-{"time":"2026-03-12T19:39:47.893968667+05:30","level":"INFO","msg":"writer: started","stream_id":"rvc5iat2"}

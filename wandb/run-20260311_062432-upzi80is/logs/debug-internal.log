@@ -1,7 +1,0 @@
-{"time":"2026-03-11T06:24:32.62101327+05:30","level":"INFO","msg":"stream: starting","core version":"0.24.1"}
-{"time":"2026-03-11T06:24:33.460989278+05:30","level":"INFO","msg":"stream: created new stream","id":"upzi80is"}
-{"time":"2026-03-11T06:24:33.461156343+05:30","level":"INFO","msg":"handler: started","stream_id":"upzi80is"}
-{"time":"2026-03-11T06:24:33.461473137+05:30","level":"INFO","msg":"stream: started","id":"upzi80is"}
-{"time":"2026-03-11T06:24:33.461659627+05:30","level":"INFO","msg":"sender: started","stream_id":"upzi80is"}
-{"time":"2026-03-11T06:24:33.461964823+05:30","level":"INFO","msg":"writer: started","stream_id":"upzi80is"}
-{"time":"2026-03-11T06:40:01.389807555+05:30","level":"INFO","msg":"api: retrying error","error":"Post \"https://api.wandb.ai/files/swami2004/REP/upzi80is/file_stream\": net/http: request canceled (Client.Timeout exceeded while awaiting headers)"}
