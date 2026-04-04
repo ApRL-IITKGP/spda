@@ -18,8 +18,8 @@ pip install wandb torch imageio tqdm tyro
 Collect ground-truth trajectories using ManiSkill3's built-in motion planner before training.
 
 ```bash
-# Collect 200 expert episodes, save 10 GIFs for visual verification
-python examples/baselines/sac/collect_demos.py --num_demos 200 --num_gif_episodes 10 --seed 0
+# Collect 500 expert episodes, save 10 GIFs for visual verification
+python examples/baselines/sac/collect_demos.py --num_demos 500 --num_gif_episodes 10 --seed 0
 
 # Quick sanity check (5 demos, all rendered as GIFs)
 python examples/baselines/sac/collect_demos.py --num_demos 5 --num_gif_episodes 5 --out_dir ./quick_test
