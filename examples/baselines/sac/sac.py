@@ -39,7 +39,7 @@ class Args:
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "ManiSkill"
     """the wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: Optional[str] = "agv_rego"
     """the entity (team) of wandb's project"""
     wandb_group: str = "SAC"
     """the group of the run for wandb"""
@@ -69,17 +69,17 @@ class Args:
     """whether to let parallel environments reset upon termination instead of truncation"""
     eval_partial_reset: bool = False
     """whether to let parallel evaluation environments reset upon termination instead of truncation"""
-    num_steps: int = 50
+    num_steps: int = 100
     """the number of steps to run in each environment per policy rollout"""
-    num_eval_steps: int = 50
+    num_eval_steps: int = 100
     """the number of steps to run in each evaluation environment during evaluation"""
     reconfiguration_freq: Optional[int] = None
     """how often to reconfigure the environment during training"""
     eval_reconfiguration_freq: Optional[int] = 1
     """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
-    eval_freq: int = 25
+    eval_freq: int = 1000
     """evaluation frequency in terms of iterations"""
-    save_train_video_freq: Optional[int] = None
+    save_train_video_freq: Optional[int] = 100000
     """frequency to save training videos in terms of iterations"""
     control_mode: Optional[str] = "pd_joint_delta_pos"
     """the control mode to use for the environment"""
@@ -419,15 +419,15 @@ if __name__ == "__main__":
                 break
             actor.train()
 
-            if args.save_model:
-                model_path = f"runs/{run_name}/ckpt_{global_step}.pt"
-                torch.save({
-                    'actor': actor.state_dict(),
-                    'qf1': qf1_target.state_dict(),
-                    'qf2': qf2_target.state_dict(),
-                    'log_alpha': log_alpha,
-                }, model_path)
-                print(f"model saved to {model_path}")
+            # if args.save_model:
+            #     model_path = f"runs/{run_name}/ckpt_{global_step}.pt"
+            #     torch.save({
+            #         'actor': actor.state_dict(),
+            #         'qf1': qf1_target.state_dict(),
+            #         'qf2': qf2_target.state_dict(),
+            #         'log_alpha': log_alpha,
+            #     }, model_path)
+            #     print(f"model saved to {model_path}")
 
         # Collect samples from environemnts
         rollout_time = time.perf_counter()
@@ -436,7 +436,7 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: put action logic here
             if not learning_has_started:
-                actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
+                actions = 2 * torch.rand(size=envs.action_space.shape, dtype=torch.float32, device=device) - 1
             else:
                 actions, _, _ = actor.get_action(obs)
                 actions = actions.detach()

@@ -90,6 +90,8 @@ class Args:
     # ── Environment ────────────────────────────────────────────────────────
     env_id: str = "PickCube-v1"
     """the id of the environment"""
+    reward_mode: str = "sparse"
+    """the reward mode to use"""
     env_vectorization: str = "gpu"
     """the type of environment vectorization to use"""
     num_envs: int = 16
@@ -566,7 +568,7 @@ if __name__ == "__main__":
 
     if args.exp_name is None:
         args.exp_name = os.path.basename(__file__)[: -len(".py")]
-        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+        run_name = f"{args.env_id}__{args.exp_name}__{args.reward_mode}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
 
@@ -580,7 +582,7 @@ if __name__ == "__main__":
 
     # ── Environment setup ──────────────────────────────────────────────────
     # obs_mode is always "state" — flat 1-D state vectors, no images.
-    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu")
+    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", reward_mode=args.reward_mode)
     if args.control_mode is not None:
         env_kwargs["control_mode"] = args.control_mode
 
@@ -644,7 +646,7 @@ if __name__ == "__main__":
                 **env_kwargs,
                 num_envs=args.num_envs,
                 env_id=args.env_id,
-                reward_mode="normalized_dense",
+                # reward_mode="sparse",
                 env_horizon=max_episode_steps,
                 partial_reset=args.partial_reset,
             )
@@ -652,7 +654,7 @@ if __name__ == "__main__":
                 **env_kwargs,
                 num_envs=args.num_eval_envs,
                 env_id=args.env_id,
-                reward_mode="normalized_dense",
+                # reward_mode="sparse",
                 env_horizon=max_episode_steps,
                 partial_reset=False,
             )

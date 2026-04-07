@@ -62,9 +62,10 @@ python examples/baselines/sac/spda_sac.py \
   --critic_threshold -5.0 \
   --demo_distance_threshold 0.1 \
   --num_envs 16 \
+  --reward_mode sparse \
   --total_timesteps 1000000 \
   --track \
-  --wandb_entity <your_entity> \
+  --wandb_entity agv_rego \
   --wandb_project_name SPDA \
   --wandb_group SPDA \
   --seed 42
@@ -79,17 +80,30 @@ python examples/baselines/sac/sac.py \
   --seed 1
 ```
 
+---
+
+## Project Monitoring
+
+Training progress, success rates, and loss curves can be monitored in real-time on Weights & Biases:
+
+- **W&B Project Dashboard:** [https://wandb.ai/agv_rego/SPDA](https://wandb.ai/agv_rego/SPDA)
+- **Training Group:** `SPDA` (3-seed sweep)
+
+---
+
+
 ### Multi-seed replication (3 seeds)
 
 ```bash
 for SEED in 1 42 123; do
   python examples/baselines/sac/spda_sac.py \
-    --demo_path ./demos/demos.pt \
+    --demo_path demos/demos.pt \
     --demo_sampling_ratio 0.5 \
     --critic_threshold -5.0 \
     --demo_distance_threshold 0.1 \
     --num_envs 16 --total_timesteps 1000000 \
-    --track --wandb_entity <your_entity> \
+    --reward_mode sparse \
+    --track --wandb_entity agv_rego \
     --wandb_project_name SPDA --wandb_group SPDA \
     --seed $SEED
 done
